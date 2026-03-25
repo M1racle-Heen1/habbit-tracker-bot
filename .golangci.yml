@@ -1,0 +1,28 @@
+linters:
+  enable:
+    - errcheck       # unhandled errors
+    - gosimple       # simplification hints
+    - govet          # go vet checks
+    - staticcheck    # static analysis
+    - unused         # unused code
+    - gofmt          # formatting
+    - goimports      # import order
+    - misspell       # typos
+    - bodyclose      # http body not closed
+    - noctx          # http requests without context
+    - exhaustive     # switch exhaustiveness on enums
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/saidakmal/habbit-tracker-bot
+
+  errcheck:
+    check-type-assertions: true
+
+issues:
+  exclude-rules:
+    # Ignore error check on logger.Sync() — acceptable loss on shutdown
+    - text: "Error return value of .*(logger.Sync|zap.*Sync).*is not checked"
+      linters: [ errcheck ]
+
+version: 2

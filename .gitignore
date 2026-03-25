@@ -1,0 +1,5 @@
+.env
+/app
+*.exe
+.idea/
+.DS_Store
