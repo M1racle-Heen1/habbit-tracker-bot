@@ -16,13 +16,21 @@ func NewHabitUsecase(habitRepo HabitRepository, activityRepo ActivityRepository)
 	return &HabitUsecase{habitRepo: habitRepo, activityRepo: activityRepo}
 }
 
-func (u *HabitUsecase) CreateHabit(ctx context.Context, userID int64, name string, intervalMinutes, startHour, endHour int) (*domain.Habit, error) {
+type HabitStats struct {
+	Habit         *domain.Habit
+	TotalDays     int
+	CompletedDays int
+	CompletionPct int
+}
+
+func (u *HabitUsecase) CreateHabit(ctx context.Context, userID int64, name string, intervalMinutes, startHour, endHour, goalDays int) (*domain.Habit, error) {
 	habit := &domain.Habit{
 		UserID:          userID,
 		Name:            name,
 		IntervalMinutes: intervalMinutes,
 		StartHour:       startHour,
 		EndHour:         endHour,
+		GoalDays:        goalDays,
 	}
 	if err := u.habitRepo.Create(ctx, habit); err != nil {
 		return nil, err
@@ -52,7 +60,6 @@ func (u *HabitUsecase) MarkDone(ctx context.Context, userID, habitID int64) erro
 		return domain.ErrAlreadyDone
 	}
 
-	// streak: +1 if done yesterday, else reset to 1
 	if habit.LastDoneAt != nil && sameDay(habit.LastDoneAt.AddDate(0, 0, 1), now) {
 		habit.Streak++
 	} else {
@@ -63,6 +70,9 @@ func (u *HabitUsecase) MarkDone(ctx context.Context, userID, habitID int64) erro
 	if err := u.habitRepo.Update(ctx, habit); err != nil {
 		return err
 	}
+	// Clear snooze after marking done
+	_ = u.habitRepo.SetSnoozeUntil(ctx, habitID, nil)
+
 	return u.activityRepo.Save(ctx, &domain.Activity{
 		UserID:  userID,
 		HabitID: habitID,
@@ -72,6 +82,108 @@ func (u *HabitUsecase) MarkDone(ctx context.Context, userID, habitID int64) erro
 
 func (u *HabitUsecase) DeleteHabit(ctx context.Context, userID, habitID int64) error {
 	return u.habitRepo.Delete(ctx, habitID, userID)
+}
+
+func (u *HabitUsecase) EditHabit(ctx context.Context, userID, habitID int64, name string, intervalMinutes, startHour, endHour int) (*domain.Habit, error) {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return nil, err
+	}
+	if habit.UserID != userID {
+		return nil, domain.ErrForbidden
+	}
+	habit.Name = name
+	habit.IntervalMinutes = intervalMinutes
+	habit.StartHour = startHour
+	habit.EndHour = endHour
+	if err := u.habitRepo.UpdateSettings(ctx, habit); err != nil {
+		return nil, err
+	}
+	return habit, nil
+}
+
+func (u *HabitUsecase) PauseHabit(ctx context.Context, userID, habitID int64) error {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return err
+	}
+	if habit.UserID != userID {
+		return domain.ErrForbidden
+	}
+	habit.IsPaused = true
+	return u.habitRepo.UpdateSettings(ctx, habit)
+}
+
+func (u *HabitUsecase) ResumeHabit(ctx context.Context, userID, habitID int64) error {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return err
+	}
+	if habit.UserID != userID {
+		return domain.ErrForbidden
+	}
+	habit.IsPaused = false
+	return u.habitRepo.UpdateSettings(ctx, habit)
+}
+
+func (u *HabitUsecase) SnoozeHabit(ctx context.Context, habitID int64, minutes int) error {
+	t := time.Now().Add(time.Duration(minutes) * time.Minute)
+	return u.habitRepo.SetSnoozeUntil(ctx, habitID, &t)
+}
+
+func (u *HabitUsecase) SetGoal(ctx context.Context, userID, habitID int64, days int) error {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return err
+	}
+	if habit.UserID != userID {
+		return domain.ErrForbidden
+	}
+	habit.GoalDays = days
+	return u.habitRepo.UpdateSettings(ctx, habit)
+}
+
+func (u *HabitUsecase) GetStats(ctx context.Context, userID int64, days int) ([]*HabitStats, error) {
+	habits, err := u.habitRepo.ListByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	from := now.AddDate(0, 0, -days)
+
+	var stats []*HabitStats
+	for _, h := range habits {
+		count, err := u.activityRepo.CountByHabitAndDateRange(ctx, h.ID, from, now.AddDate(0, 0, 1))
+		if err != nil {
+			return nil, err
+		}
+		daysActive := int(now.Sub(h.CreatedAt).Hours()/24) + 1
+		if daysActive > days {
+			daysActive = days
+		}
+		pct := 0
+		if daysActive > 0 {
+			pct = count * 100 / daysActive
+		}
+		stats = append(stats, &HabitStats{
+			Habit:         h,
+			TotalDays:     daysActive,
+			CompletedDays: count,
+			CompletionPct: pct,
+		})
+	}
+	return stats, nil
+}
+
+func (u *HabitUsecase) GetHistory(ctx context.Context, userID, habitID int64, from, to time.Time) ([]time.Time, error) {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return nil, err
+	}
+	if habit.UserID != userID {
+		return nil, domain.ErrForbidden
+	}
+	return u.activityRepo.ListDatesByHabitAndDateRange(ctx, habitID, from, to)
 }
 
 func (u *HabitUsecase) UpdateNotified(ctx context.Context, habitID int64) error {
@@ -84,6 +196,10 @@ func (u *HabitUsecase) ListAllForScheduler(ctx context.Context) ([]*domain.Habit
 
 func (u *HabitUsecase) ResetStreaks(ctx context.Context) error {
 	return u.habitRepo.ResetStreaksForInactive(ctx)
+}
+
+func (u *HabitUsecase) ListStreaksToBeReset(ctx context.Context) ([]*domain.HabitWithTelegramID, error) {
+	return u.habitRepo.ListStreaksToBeReset(ctx)
 }
 
 // IsDoneToday reports whether the habit was completed today.
@@ -108,8 +224,12 @@ func ShouldSendInterval(h *domain.Habit, now time.Time) bool {
 }
 
 // IsFinalReminder reports whether it's within the last 30 minutes of the active window.
-func IsFinalReminder(now time.Time, endHour int) bool {
-	return now.Hour() == endHour-1 && now.Minute() >= 30
+// Habits with interval >= 480 min (daily) are excluded from forced final reminders.
+func IsFinalReminder(h *domain.Habit, now time.Time) bool {
+	if h.IntervalMinutes >= 480 {
+		return false
+	}
+	return now.Hour() == h.EndHour-1 && now.Minute() >= 30
 }
 
 func sameDay(a, b time.Time) bool {
@@ -122,4 +242,3 @@ func sameDay(a, b time.Time) bool {
 func (u *HabitUsecase) TrackHabit(ctx context.Context, userID, habitID int64) error {
 	return u.MarkDone(ctx, userID, habitID)
 }
-

@@ -13,6 +13,10 @@ type Habit struct {
 	LastDoneAt      *time.Time
 	LastNotifiedAt  *time.Time
 	Streak          int
+	BestStreak      int
+	IsPaused        bool
+	GoalDays        int
+	SnoozeUntil     *time.Time
 	CreatedAt       time.Time
 }
 
@@ -26,5 +30,7 @@ type Activity struct {
 
 type HabitWithTelegramID struct {
 	Habit
-	TelegramID int64
+	TelegramID    int64
+	UserTimezone  string
+	UserFirstName string
 }

@@ -17,11 +17,16 @@ func NewBot(api *tgbotapi.BotAPI, handler *Handler, logger *zap.Logger) *Bot {
 
 func (b *Bot) Start() {
 	commands := []tgbotapi.BotCommand{
-		{Command: "list_habits", Description: "Список привычек"},
+		{Command: "list_habits", Description: "Список привычек с прогрессом"},
 		{Command: "add_habit", Description: "Добавить привычку"},
 		{Command: "done", Description: "Отметить выполнение"},
+		{Command: "edit_habit", Description: "Редактировать привычку"},
+		{Command: "pause_habit", Description: "Поставить привычку на паузу"},
+		{Command: "resume_habit", Description: "Снять привычку с паузы"},
+		{Command: "stats", Description: "Статистика за 30 дней"},
+		{Command: "history", Description: "История выполнений"},
+		{Command: "timezone", Description: "Изменить часовой пояс"},
 		{Command: "delete_habit", Description: "Удалить привычку"},
-		{Command: "health", Description: "Статус бота"},
 	}
 	if _, err := b.api.Request(tgbotapi.NewSetMyCommands(commands...)); err != nil {
 		b.logger.Warn("failed to set commands menu", zap.Error(err))

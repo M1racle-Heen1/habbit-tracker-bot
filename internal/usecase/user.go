@@ -33,3 +33,7 @@ func (u *UserUsecase) GetOrCreateUser(ctx context.Context, telegramID int64, use
 	}
 	return user, nil
 }
+
+func (u *UserUsecase) SetTimezone(ctx context.Context, userID int64, timezone string) error {
+	return u.repo.UpdateTimezone(ctx, userID, timezone)
+}

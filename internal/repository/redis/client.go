@@ -26,3 +26,7 @@ func (c *Cache) Get(ctx context.Context, key string) (string, error) {
 func (c *Cache) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
 	return c.client.Set(ctx, key, value, ttl).Err()
 }
+
+func (c *Cache) Delete(ctx context.Context, key string) error {
+	return c.client.Del(ctx, key).Err()
+}

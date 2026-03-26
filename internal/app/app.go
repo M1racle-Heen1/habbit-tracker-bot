@@ -36,7 +36,7 @@ func New() *fx.App {
 			telegram.NewHandler,
 			telegram.NewBot,
 			newLocation,
-		scheduler.New,
+			scheduler.New,
 		),
 		fx.Invoke(registerHooks),
 	)
