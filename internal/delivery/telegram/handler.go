@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/saidakmal/habbit-tracker-bot/internal/domain"
+	"github.com/saidakmal/habbit-tracker-bot/internal/gamification"
+	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
 	"github.com/saidakmal/habbit-tracker-bot/internal/usecase"
 )
 
@@ -84,6 +86,13 @@ func NewHandler(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, api 
 		logger:  logger,
 		cache:   cache,
 	}
+}
+
+func (h *Handler) lang(user *domain.User) i18n.Lang {
+	if user.Language == "" {
+		return i18n.RU
+	}
+	return user.Language
 }
 
 // ── State helpers (Redis-backed) ─────────────────────────────────────────────
@@ -196,6 +205,12 @@ func (h *Handler) handleCommand(ctx context.Context, msg *tgbotapi.Message, user
 		h.handleHistory(ctx, msg, user)
 	case "timezone":
 		h.handleTimezone(msg)
+	case "language":
+		h.handleLanguage(msg)
+	case "today":
+		h.handleToday(ctx, msg, user)
+	case "achievements":
+		h.handleAchievements(ctx, msg, user)
 	case "health":
 		h.send(msg.Chat.ID, "OK")
 	}
@@ -286,6 +301,8 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbPauseResume(ctx, cq, chatID, msgID, arg, true)
 	case "resume":
 		h.cbPauseResume(ctx, cq, chatID, msgID, arg, false)
+	case "lang":
+		h.cbLanguage(ctx, cq, chatID, msgID, arg)
 	case "tz":
 		h.cbTimezone(ctx, cq, chatID, msgID, arg)
 	case "history":
@@ -310,9 +327,25 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 // ── Add habit flow ─────────────────────────────────────────────────────────────
 
 func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+
+	isNew := time.Since(user.CreatedAt) < 60*time.Second
+	if isNew {
+		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "language.choose"))
+		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
+			tgbotapi.NewInlineKeyboardButtonData("🇬🇧 English", "lang:en"),
+			tgbotapi.NewInlineKeyboardButtonData("🇰🇿 Қазақша", "lang:kz"),
+		))
+		if _, err := h.api.Send(m); err != nil {
+			h.logger.Error("send start language picker", zap.Error(err))
+		}
+		return
+	}
+
 	habits, _ := h.habitUC.ListHabits(ctx, user.ID)
 	if len(habits) == 0 {
-		text := fmt.Sprintf("Привет, %s! 👋\n\nЯ помогу тебе формировать полезные привычки.\n\nВыбери шаблон или создай свою:", user.FirstName)
+		text := i18n.T(lang, "onboarding.welcome_new", user.FirstName)
 		m := tgbotapi.NewMessage(msg.Chat.ID, text)
 		m.ReplyMarkup = templateKeyboard()
 		if _, err := h.api.Send(m); err != nil {
@@ -321,22 +354,37 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *
 		return
 	}
 
-	text := fmt.Sprintf(`Привет, %s! 👋
+	h.send(msg.Chat.ID, i18n.T(lang, "onboarding.welcome_returning", user.FirstName))
+}
 
-Команды:
-/add_habit — добавить привычку
-/list_habits — список с прогрессом
-/done — отметить выполнение
-/edit_habit — редактировать привычку
-/pause_habit — поставить на паузу
-/resume_habit — снять с паузы
-/stats — статистика за 30 дней
-/history — история выполнений
-/timezone — изменить часовой пояс
-/delete_habit — удалить привычку
-/cancel — отменить текущее действие`, user.FirstName)
+func (h *Handler) handleLanguage(msg *tgbotapi.Message) {
+	m := tgbotapi.NewMessage(msg.Chat.ID, "Выбери язык / Choose language / Тіл таңда:")
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
+		tgbotapi.NewInlineKeyboardButtonData("🇬🇧 English", "lang:en"),
+		tgbotapi.NewInlineKeyboardButtonData("🇰🇿 Қазақша", "lang:kz"),
+	))
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send language keyboard", zap.Error(err))
+	}
+}
 
-	h.send(msg.Chat.ID, text)
+func (h *Handler) cbLanguage(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	if arg != "ru" && arg != "en" && arg != "kz" {
+		return
+	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	if err := h.userUC.SetLanguage(ctx, user.ID, arg); err != nil {
+		h.logger.Error("SetLanguage", zap.Error(err))
+		h.send(chatID, i18n.T(arg, "error.generic"))
+		return
+	}
+	labels := map[string]string{"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "kz": "🇰🇿 Қазақша"}
+	h.editMsg(chatID, msgID, "✅ "+labels[arg])
 }
 
 func (h *Handler) startAddHabit(msg *tgbotapi.Message) {
@@ -524,19 +572,20 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 		h.logger.Error("GetOrCreateUser", zap.Error(err))
 		return
 	}
+	lang := h.lang(user)
 	if err := h.habitUC.MarkDone(ctx, user.ID, habitID); err != nil {
 		if errors.Is(err, domain.ErrAlreadyDone) {
-			h.editMsg(chatID, msgID, "Привычка уже выполнена сегодня ✓")
+			h.editMsg(chatID, msgID, i18n.T(lang, "habit.already_done"))
 			return
 		}
 		h.logger.Error("MarkDone", zap.Error(err))
-		h.send(chatID, "Ошибка, попробуй позже.")
+		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
 	habit, err := h.habitUC.GetHabit(ctx, habitID)
-	msg := "✅ Выполнено!"
+	msg := i18n.T(lang, "habit.done_simple")
 	if err == nil {
-		msg = doneMessage(habit.Name, habit.Streak, habit.GoalDays)
+		msg = doneMessage(habit.Name, habit.Streak, habit.GoalDays, lang)
 	}
 	// Replace the keyboard with the result message
 	h.editMsg(chatID, msgID, msg)
@@ -921,19 +970,20 @@ func (h *Handler) cbSnooze(ctx context.Context, chatID int64, msgID int, arg str
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
 	stats, err := h.habitUC.GetStats(ctx, user.ID, 30)
 	if err != nil {
 		h.logger.Error("GetStats", zap.Error(err))
-		h.send(msg.Chat.ID, "Не удалось загрузить статистику.")
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
 		return
 	}
 	if len(stats) == 0 {
-		h.send(msg.Chat.ID, "У тебя пока нет привычек. Добавь: /add_habit")
+		h.send(msg.Chat.ID, i18n.T(lang, "stats.empty"))
 		return
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📊 Статистика за 30 дней\n\n")
+	sb.WriteString(i18n.T(lang, "stats.header"))
 	for _, s := range stats {
 		bar := progressBar(s.CompletionPct)
 		sb.WriteString(fmt.Sprintf("%s %s\n", bar, s.Habit.Name))
@@ -946,6 +996,7 @@ func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *
 		}
 		sb.WriteString("\n\n")
 	}
+	sb.WriteString(i18n.T(lang, "stats.xp_level", user.Level, user.XP, user.StreakShields))
 	h.send(msg.Chat.ID, sb.String())
 }
 
@@ -1079,6 +1130,70 @@ func (h *Handler) cbSetGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 	} else {
 		h.editMsg(chatID, msgID, fmt.Sprintf("🎯 Цель установлена: %d дней!", days))
 	}
+}
+
+// ── Today ─────────────────────────────────────────────────────────────────────
+
+func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	habits, err := h.habitUC.ListHabits(ctx, user.ID)
+	if err != nil {
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+	now := time.Now()
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "today.header"))
+	var rows [][]tgbotapi.InlineKeyboardButton
+	pending := 0
+	for _, habit := range habits {
+		if habit.IsPaused {
+			continue
+		}
+		if usecase.IsDoneToday(habit, now) {
+			sb.WriteString(fmt.Sprintf("✅ %s\n", habit.Name))
+		} else {
+			sb.WriteString(fmt.Sprintf("○ %s\n", habit.Name))
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ "+habit.Name, fmt.Sprintf("done:%d", habit.ID))))
+			pending++
+		}
+	}
+	if pending == 0 && len(habits) == 0 {
+		h.send(msg.Chat.ID, i18n.T(lang, "today.none"))
+		return
+	}
+	if pending == 0 {
+		h.send(msg.Chat.ID, i18n.T(lang, "today.all_done"))
+		return
+	}
+	m := tgbotapi.NewMessage(msg.Chat.ID, sb.String())
+	if len(rows) > 0 {
+		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send today", zap.Error(err))
+	}
+}
+
+// ── Achievements ──────────────────────────────────────────────────────────────
+
+func (h *Handler) handleAchievements(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	achievements, err := h.userUC.ListAchievements(ctx, user.ID)
+	if err != nil {
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+	if len(achievements) == 0 {
+		h.send(msg.Chat.ID, i18n.T(lang, "achievement.list_empty"))
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "achievement.list_header"))
+	for _, a := range achievements {
+		sb.WriteString(fmt.Sprintf("🏆 %s — %s\n", gamification.DisplayName(a.Code, lang), a.UnlockedAt.Format("02.01.2006")))
+	}
+	h.send(msg.Chat.ID, sb.String())
 }
 
 // ── Timezone ──────────────────────────────────────────────────────────────────
@@ -1304,26 +1419,14 @@ func (h *Handler) send(chatID int64, text string) {
 	}
 }
 
-func doneMessage(name string, streak, goalDays int) string {
-	goal := ""
-	if goalDays > 0 && streak <= goalDays {
-		pct := streak * 100 / goalDays
-		goal = fmt.Sprintf("\n🎯 %s %d/%d дней", progressBar(pct), streak, goalDays)
+func doneMessage(name string, streak, goalDays int, lang i18n.Lang) string {
+	if goalDays > 0 && streak > 0 {
+		return i18n.T(lang, "habit.done_goal", name, streak, goalDays)
 	}
-	switch {
-	case streak >= 100:
-		return fmt.Sprintf("🏆 «%s» выполнена!\n100+ дней подряд — легенда! Стрик: %d 🌟%s", name, streak, goal)
-	case streak >= 30:
-		return fmt.Sprintf("💎 «%s» выполнена!\nМесяц без пропусков! Стрик: %d дней%s", name, streak, goal)
-	case streak >= 14:
-		return fmt.Sprintf("🔥🔥 «%s» выполнена!\nДве недели подряд! Стрик: %d дней%s", name, streak, goal)
-	case streak >= 7:
-		return fmt.Sprintf("🔥 «%s» выполнена!\nНеделя подряд! Стрик: %d дней%s", name, streak, goal)
-	case streak >= 3:
-		return fmt.Sprintf("⚡ «%s» выполнена!\nСтрик: %d дня подряд%s", name, streak, goal)
-	default:
-		return fmt.Sprintf("✅ «%s» выполнена!\nСтрик: %d день%s", name, streak, goal)
+	if streak > 0 {
+		return i18n.T(lang, "habit.done_streak", name, streak)
 	}
+	return i18n.T(lang, "habit.done_simple")
 }
 
 func formatInterval(minutes int) string {
