@@ -11,6 +11,13 @@ type UserRepository interface {
 	Save(ctx context.Context, user *domain.User) error
 	GetByTelegramID(ctx context.Context, telegramID int64) (*domain.User, error)
 	UpdateTimezone(ctx context.Context, userID int64, timezone string) error
+	UpdateLanguage(ctx context.Context, userID int64, language string) error
+	AddXP(ctx context.Context, userID int64, xp int) (newXP int, newLevel int, err error)
+	UpdateStreakShields(ctx context.Context, userID int64, shields int) error
+	AddAchievement(ctx context.Context, userID int64, code string) error
+	HasAchievement(ctx context.Context, userID int64, code string) (bool, error)
+	ListAchievements(ctx context.Context, userID int64) ([]domain.UserAchievement, error)
+	GetByID(ctx context.Context, userID int64) (*domain.User, error)
 }
 
 type HabitRepository interface {
@@ -32,6 +39,8 @@ type ActivityRepository interface {
 	ListByUserAndDate(ctx context.Context, userID int64, date time.Time) ([]*domain.Activity, error)
 	CountByHabitAndDateRange(ctx context.Context, habitID int64, from, to time.Time) (int, error)
 	ListDatesByHabitAndDateRange(ctx context.Context, habitID int64, from, to time.Time) ([]time.Time, error)
+	CountAllByUser(ctx context.Context, userID int64) (int, error)
+	GetAverageCompletionHour(ctx context.Context, habitID int64) (hour int, hasData bool, err error)
 }
 
 type Cache interface {

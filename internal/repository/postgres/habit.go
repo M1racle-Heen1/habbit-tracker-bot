@@ -262,3 +262,21 @@ func (r *ActivityRepository) ListDatesByHabitAndDateRange(ctx context.Context, h
 	}
 	return dates, rows.Err()
 }
+
+func (r *ActivityRepository) CountAllByUser(ctx context.Context, userID int64) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM activities WHERE user_id = $1`, userID).Scan(&count)
+	return count, err
+}
+
+func (r *ActivityRepository) GetAverageCompletionHour(ctx context.Context, habitID int64) (int, bool, error) {
+	var avgHour *float64
+	err := r.pool.QueryRow(ctx,
+		`SELECT AVG(EXTRACT(HOUR FROM date)) FROM activities WHERE habit_id = $1 AND date > NOW() - INTERVAL '30 days'`,
+		habitID,
+	).Scan(&avgHour)
+	if err != nil || avgHour == nil {
+		return 0, false, err
+	}
+	return int(*avgHour), true, nil
+}

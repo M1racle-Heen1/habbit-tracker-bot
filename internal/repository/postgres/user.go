@@ -24,17 +24,17 @@ func (r *UserRepository) Save(ctx context.Context, user *domain.User) error {
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (telegram_id) DO UPDATE
 		   SET username = EXCLUDED.username, first_name = EXCLUDED.first_name
-		 RETURNING id, timezone, created_at`,
+		 RETURNING id, timezone, language, xp, level, streak_shields, evening_recap_hour, created_at`,
 		user.TelegramID, user.Username, user.FirstName,
-	).Scan(&user.ID, &user.Timezone, &user.CreatedAt)
+	).Scan(&user.ID, &user.Timezone, &user.Language, &user.XP, &user.Level, &user.StreakShields, &user.EveningRecapHour, &user.CreatedAt)
 }
 
 func (r *UserRepository) GetByTelegramID(ctx context.Context, telegramID int64) (*domain.User, error) {
 	user := &domain.User{}
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, telegram_id, username, first_name, timezone, created_at FROM users WHERE telegram_id = $1`,
+		`SELECT id, telegram_id, username, first_name, timezone, language, xp, level, streak_shields, evening_recap_hour, created_at FROM users WHERE telegram_id = $1`,
 		telegramID,
-	).Scan(&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.Timezone, &user.CreatedAt)
+	).Scan(&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.Timezone, &user.Language, &user.XP, &user.Level, &user.StreakShields, &user.EveningRecapHour, &user.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -47,4 +47,81 @@ func (r *UserRepository) GetByTelegramID(ctx context.Context, telegramID int64) 
 func (r *UserRepository) UpdateTimezone(ctx context.Context, userID int64, timezone string) error {
 	_, err := r.pool.Exec(ctx, `UPDATE users SET timezone = $1 WHERE id = $2`, timezone, userID)
 	return err
+}
+
+func (r *UserRepository) UpdateLanguage(ctx context.Context, userID int64, language string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET language = $1 WHERE id = $2`, language, userID)
+	return err
+}
+
+func (r *UserRepository) AddXP(ctx context.Context, userID int64, xp int) (int, int, error) {
+	thresholds := []int{0, 100, 250, 500, 1000}
+	levelFor := func(totalXP int) int {
+		lv := 1
+		for i, t := range thresholds {
+			if totalXP >= t {
+				lv = i + 1
+			}
+		}
+		if totalXP >= 1000 {
+			lv = 5 + (totalXP-1000)/500
+		}
+		return lv
+	}
+	var newXP int
+	err := r.pool.QueryRow(ctx, `UPDATE users SET xp = xp + $1 WHERE id = $2 RETURNING xp`, xp, userID).Scan(&newXP)
+	if err != nil {
+		return 0, 0, err
+	}
+	newLevel := levelFor(newXP)
+	_, err = r.pool.Exec(ctx, `UPDATE users SET level = $1 WHERE id = $2`, newLevel, userID)
+	return newXP, newLevel, err
+}
+
+func (r *UserRepository) UpdateStreakShields(ctx context.Context, userID int64, shields int) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET streak_shields = $1 WHERE id = $2`, shields, userID)
+	return err
+}
+
+func (r *UserRepository) AddAchievement(ctx context.Context, userID int64, code string) error {
+	_, err := r.pool.Exec(ctx, `INSERT INTO user_achievements (user_id, achievement_code) VALUES ($1, $2) ON CONFLICT DO NOTHING`, userID, code)
+	return err
+}
+
+func (r *UserRepository) HasAchievement(ctx context.Context, userID int64, code string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_achievements WHERE user_id = $1 AND achievement_code = $2)`, userID, code).Scan(&exists)
+	return exists, err
+}
+
+func (r *UserRepository) ListAchievements(ctx context.Context, userID int64) ([]domain.UserAchievement, error) {
+	rows, err := r.pool.Query(ctx, `SELECT achievement_code, unlocked_at FROM user_achievements WHERE user_id = $1 ORDER BY unlocked_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []domain.UserAchievement
+	for rows.Next() {
+		var a domain.UserAchievement
+		if err := rows.Scan(&a.Code, &a.UnlockedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+func (r *UserRepository) GetByID(ctx context.Context, userID int64) (*domain.User, error) {
+	user := &domain.User{}
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, telegram_id, username, first_name, timezone, language, xp, level, streak_shields, evening_recap_hour, created_at FROM users WHERE id = $1`,
+		userID,
+	).Scan(&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.Timezone, &user.Language, &user.XP, &user.Level, &user.StreakShields, &user.EveningRecapHour, &user.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return user, nil
 }
