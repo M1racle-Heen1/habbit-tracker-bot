@@ -13,13 +13,14 @@ import (
 )
 
 type Scheduler struct {
-	habitUC *usecase.HabitUsecase
-	api     *tgbotapi.BotAPI
-	logger  *zap.Logger
+	habitUC  *usecase.HabitUsecase
+	api      *tgbotapi.BotAPI
+	logger   *zap.Logger
+	location *time.Location
 }
 
-func New(habitUC *usecase.HabitUsecase, api *tgbotapi.BotAPI, logger *zap.Logger) *Scheduler {
-	return &Scheduler{habitUC: habitUC, api: api, logger: logger}
+func New(habitUC *usecase.HabitUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, loc *time.Location) *Scheduler {
+	return &Scheduler{habitUC: habitUC, api: api, logger: logger, location: loc}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
@@ -30,8 +31,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case now := <-ticker.C:
-			s.tick(ctx, now)
+		case t := <-ticker.C:
+			s.tick(ctx, t.In(s.location))
 		}
 	}
 }

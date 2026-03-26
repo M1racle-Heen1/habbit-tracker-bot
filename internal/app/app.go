@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +35,8 @@ func New() *fx.App {
 			usecase.NewHabitUsecase,
 			telegram.NewHandler,
 			telegram.NewBot,
-			scheduler.New,
+			newLocation,
+		scheduler.New,
 		),
 		fx.Invoke(registerHooks),
 	)
@@ -64,6 +66,10 @@ func newRedisClient(cfg *config.Config) *redisc.Client {
 
 func newTelegramAPI(cfg *config.Config) (*tgbotapi.BotAPI, error) {
 	return tgbotapi.NewBotAPI(cfg.TelegramToken)
+}
+
+func newLocation(cfg *config.Config) (*time.Location, error) {
+	return time.LoadLocation(cfg.Timezone)
 }
 
 func registerHooks(lc fx.Lifecycle, bot *telegram.Bot, sched *scheduler.Scheduler, log *zap.Logger) {

@@ -9,6 +9,7 @@ type Config struct {
 	TelegramToken string
 	DBDSN         string
 	RedisAddr     string
+	Timezone      string
 }
 
 func New() (*Config, error) {
@@ -16,6 +17,7 @@ func New() (*Config, error) {
 		TelegramToken: os.Getenv("TELEGRAM_TOKEN"),
 		DBDSN:         os.Getenv("DB_DSN"),
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		Timezone:      getEnv("TIMEZONE", "UTC"),
 	}
 	if cfg.TelegramToken == "" {
 		return nil, errors.New("TELEGRAM_TOKEN is required")

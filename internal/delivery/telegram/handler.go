@@ -222,7 +222,7 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		}
 		habit, err := h.habitUC.GetHabit(ctx, habitID)
 		if err == nil {
-			h.send(chatID, fmt.Sprintf("✅ «%s» выполнена! Стрик: %d дней 🔥", habit.Name, habit.Streak))
+			h.send(chatID, doneMessage(habit.Name, habit.Streak))
 		} else {
 			h.send(chatID, "✅ Выполнено!")
 		}
@@ -247,10 +247,23 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 }
 
 func (h *Handler) handleStart(msg *tgbotapi.Message, user *domain.User) {
-	h.send(msg.Chat.ID, fmt.Sprintf(
-		"Привет, %s! 👋\n\nКоманды:\n/list_habits — список привычек\n/add_habit — добавить привычку\n/done — отметить выполнение\n/delete_habit — удалить привычку",
-		user.FirstName,
-	))
+	text := fmt.Sprintf(`Привет, %s! 👋
+
+Я помогу тебе формировать полезные привычки и не забрасывать их.
+
+Как это работает:
+• Добавляешь привычку и задаёшь интервал напоминаний
+• Бот напоминает тебе в течение дня (только в активные часы)
+• Отмечаешь выполнение — растёт стрик 🔥
+• Если пропустил день — стрик сбрасывается
+
+Команды:
+/add_habit — добавить привычку
+/list_habits — список привычек с прогрессом
+/done — отметить привычку выполненной
+/delete_habit — удалить привычку`, user.FirstName)
+
+	h.send(msg.Chat.ID, text)
 }
 
 func (h *Handler) handleListHabits(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
@@ -370,6 +383,23 @@ func (h *Handler) sendEndHourKeyboard(chatID int64) {
 	)
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send end hour keyboard", zap.Error(err))
+	}
+}
+
+func doneMessage(name string, streak int) string {
+	switch {
+	case streak >= 100:
+		return fmt.Sprintf("🏆 «%s» выполнена!\n100+ дней подряд — легенда! Стрик: %d 🌟", name, streak)
+	case streak >= 30:
+		return fmt.Sprintf("💎 «%s» выполнена!\nМесяц без пропусков! Стрик: %d дней", name, streak)
+	case streak >= 14:
+		return fmt.Sprintf("🔥🔥 «%s» выполнена!\nДве недели подряд! Стрик: %d дней", name, streak)
+	case streak >= 7:
+		return fmt.Sprintf("🔥 «%s» выполнена!\nНеделя подряд! Стрик: %d дней", name, streak)
+	case streak >= 3:
+		return fmt.Sprintf("⚡ «%s» выполнена!\nСтрик: %d дня подряд", name, streak)
+	default:
+		return fmt.Sprintf("✅ «%s» выполнена!\nСтрик: %d день", name, streak)
 	}
 }
 
