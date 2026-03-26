@@ -7,13 +7,20 @@ import (
 	"github.com/saidakmal/habbit-tracker-bot/internal/domain"
 )
 
+type GamificationNotifier func(ctx context.Context, userID int64, habitID int64, streak int)
+
 type HabitUsecase struct {
 	habitRepo    HabitRepository
 	activityRepo ActivityRepository
+	onDone       GamificationNotifier
 }
 
 func NewHabitUsecase(habitRepo HabitRepository, activityRepo ActivityRepository) *HabitUsecase {
 	return &HabitUsecase{habitRepo: habitRepo, activityRepo: activityRepo}
+}
+
+func (u *HabitUsecase) SetGamificationNotifier(fn GamificationNotifier) {
+	u.onDone = fn
 }
 
 type HabitStats struct {
@@ -73,11 +80,19 @@ func (u *HabitUsecase) MarkDone(ctx context.Context, userID, habitID int64) erro
 	// Clear snooze after marking done
 	_ = u.habitRepo.SetSnoozeUntil(ctx, habitID, nil)
 
-	return u.activityRepo.Save(ctx, &domain.Activity{
+	if err := u.activityRepo.Save(ctx, &domain.Activity{
 		UserID:  userID,
 		HabitID: habitID,
 		Date:    now,
-	})
+	}); err != nil {
+		return err
+	}
+
+	if u.onDone != nil {
+		streak := habit.Streak
+		go u.onDone(context.Background(), userID, habitID, streak)
+	}
+	return nil
 }
 
 func (u *HabitUsecase) DeleteHabit(ctx context.Context, userID, habitID int64) error {

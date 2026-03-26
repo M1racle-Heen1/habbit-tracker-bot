@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/saidakmal/habbit-tracker-bot/internal/delivery/telegram"
+	"github.com/saidakmal/habbit-tracker-bot/internal/gamification"
 	"github.com/saidakmal/habbit-tracker-bot/internal/infrastructure/config"
 	"github.com/saidakmal/habbit-tracker-bot/internal/infrastructure/logger"
 	postgresrepo "github.com/saidakmal/habbit-tracker-bot/internal/repository/postgres"
@@ -39,6 +40,16 @@ func New() *fx.App {
 			scheduler.New,
 		),
 		fx.Invoke(registerHooks),
+	fx.Invoke(func(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, activityRepo usecase.ActivityRepository, api *tgbotapi.BotAPI, log *zap.Logger) {
+		habitUC.SetGamificationNotifier(func(ctx context.Context, userID int64, _ int64, streak int) {
+			user, err := userUC.GetByID(ctx, userID)
+			if err != nil {
+				log.Warn("gamification GetByID", zap.Error(err))
+				return
+			}
+			gamification.Run(ctx, user, streak, activityRepo, api, log, userUC)
+		})
+	}),
 	)
 }
 
