@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,11 +112,26 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			s.maybeSendEveningRecap(ctx, g.telegramID, g.userID, lang, g.habits, userNow)
 		}
 
-		// Per-habit reminders
+		// Per-habit reminders + timer expiry
 		for _, hw := range g.habits {
 			if hw.IsPaused {
 				continue
 			}
+
+			// Check if a timer has expired for this habit
+			timerKey := fmt.Sprintf("timer:%d:%d", hw.ID, hw.UserID)
+			if val, err := s.cache.Get(ctx, timerKey); err == nil {
+				expiry, _ := strconv.ParseInt(val, 10, 64)
+				if time.Now().Unix() >= expiry {
+					_ = s.cache.Delete(ctx, timerKey)
+					if !usecase.IsDoneToday(&hw.Habit, userNow) {
+						if err := s.habitUC.MarkDone(ctx, hw.UserID, hw.ID); err == nil {
+							s.api.Send(tgbotapi.NewMessage(hw.TelegramID, i18n.T(lang, "timer.done", hw.Name))) //nolint:errcheck
+						}
+					}
+				}
+			}
+
 			if hw.SnoozeUntil != nil && now.Before(*hw.SnoozeUntil) {
 				continue
 			}
@@ -158,6 +174,7 @@ func (s *Scheduler) sendReminder(ctx context.Context, telegramID int64, h *domai
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "reminder.done_button"), fmt.Sprintf("done:%d", h.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "timer.btn"), fmt.Sprintf("timer_start:%d", h.ID)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "snooze.30min"), fmt.Sprintf("snooze:%d:30", h.ID)),

@@ -295,6 +295,10 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbDoneAll(ctx, cq, chatID, msgID)
 	case "undo":
 		h.cbUndo(ctx, cq, chatID, msgID, arg)
+	case "timer_start":
+		h.cbTimerStart(ctx, cq, chatID, msgID, arg)
+	case "timer_set":
+		h.cbTimerSet(ctx, cq, chatID, msgID, arg)
 	case "pre_delete":
 		h.cbPreDelete(ctx, chatID, arg)
 	case "confirm_delete":
@@ -715,6 +719,87 @@ func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 	}
 	h.editMsg(chatID, msgID, i18n.T(lang, "today.all_done"))
 	_ = marked
+}
+
+// ── Timer ─────────────────────────────────────────────────────────────────────
+
+func timerKey(habitID, userID int64) string {
+	return fmt.Sprintf("timer:%d:%d", habitID, userID)
+}
+
+func (h *Handler) cbTimerStart(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	habitID, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return
+	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		return
+	}
+	lang := h.lang(user)
+
+	// Check if timer already running
+	if val, err := h.cache.Get(ctx, timerKey(habitID, user.ID)); err == nil {
+		expiry, _ := strconv.ParseInt(val, 10, 64)
+		remaining := int(time.Until(time.Unix(expiry, 0)).Minutes()) + 1
+		if remaining > 0 {
+			h.editMsg(chatID, msgID, i18n.T(lang, "timer.already_running", remaining))
+			return
+		}
+	}
+
+	habit, err := h.habitUC.GetHabit(ctx, habitID)
+	if err != nil {
+		h.send(chatID, i18n.T(lang, "error.generic"))
+		return
+	}
+
+	m := tgbotapi.NewEditMessageText(chatID, msgID, i18n.T(lang, "timer.choose_duration", habit.Name))
+	kb := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("15 мин", fmt.Sprintf("timer_set:%d:15", habitID)),
+			tgbotapi.NewInlineKeyboardButtonData("30 мин", fmt.Sprintf("timer_set:%d:30", habitID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("45 мин", fmt.Sprintf("timer_set:%d:45", habitID)),
+			tgbotapi.NewInlineKeyboardButtonData("60 мин", fmt.Sprintf("timer_set:%d:60", habitID)),
+		),
+	)
+	m.ReplyMarkup = &kb
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send timer duration picker", zap.Error(err))
+	}
+}
+
+func (h *Handler) cbTimerSet(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	parts := strings.SplitN(arg, ":", 2)
+	if len(parts) != 2 {
+		return
+	}
+	habitID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return
+	}
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return
+	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		return
+	}
+	lang := h.lang(user)
+	habit, err := h.habitUC.GetHabit(ctx, habitID)
+	if err != nil {
+		h.send(chatID, i18n.T(lang, "error.generic"))
+		return
+	}
+
+	expiry := time.Now().Add(time.Duration(minutes) * time.Minute)
+	ttl := time.Duration(minutes+2) * time.Minute
+	_ = h.cache.Set(ctx, timerKey(habitID, user.ID), strconv.FormatInt(expiry.Unix(), 10), ttl)
+
+	h.editMsg(chatID, msgID, i18n.T(lang, "timer.started", minutes, habit.Name))
 }
 
 // ── List habits ───────────────────────────────────────────────────────────────
@@ -1257,7 +1342,10 @@ func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *
 			sb.WriteString(fmt.Sprintf("✅ %s\n", habit.Name))
 		} else {
 			sb.WriteString(fmt.Sprintf("○ %s\n", habit.Name))
-			rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("✅ "+habit.Name, fmt.Sprintf("done:%d", habit.ID))))
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ "+habit.Name, fmt.Sprintf("done:%d", habit.ID)),
+				tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "timer.btn"), fmt.Sprintf("timer_start:%d", habit.ID)),
+			))
 			pending++
 		}
 	}
