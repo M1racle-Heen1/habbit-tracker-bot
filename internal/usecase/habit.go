@@ -267,3 +267,21 @@ func (u *HabitUsecase) GetActivityAverageHour(ctx context.Context, habitID int64
 func (u *HabitUsecase) TrackHabit(ctx context.Context, userID, habitID int64) error {
 	return u.MarkDone(ctx, userID, habitID)
 }
+
+// UndoMarkDone reverts a MarkDone by deleting today's activity and restoring
+// the previous streak and last_done_at values.
+func (u *HabitUsecase) UndoMarkDone(ctx context.Context, userID, habitID int64, prevStreak int, prevLastDoneAt *time.Time) error {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return err
+	}
+	if habit.UserID != userID {
+		return domain.ErrForbidden
+	}
+	if err := u.activityRepo.DeleteTodayActivity(ctx, habitID, time.Now()); err != nil {
+		return err
+	}
+	habit.Streak = prevStreak
+	habit.LastDoneAt = prevLastDoneAt
+	return u.habitRepo.Update(ctx, habit)
+}

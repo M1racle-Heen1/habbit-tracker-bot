@@ -281,3 +281,13 @@ func (r *ActivityRepository) GetAverageCompletionHour(ctx context.Context, habit
 	}
 	return int(*avgHour), true, nil
 }
+
+func (r *ActivityRepository) DeleteTodayActivity(ctx context.Context, habitID int64, date time.Time) error {
+	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	dayEnd := dayStart.AddDate(0, 0, 1)
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM activities WHERE habit_id = $1 AND date >= $2 AND date < $3`,
+		habitID, dayStart, dayEnd,
+	)
+	return err
+}

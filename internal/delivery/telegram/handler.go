@@ -293,6 +293,8 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbDone(ctx, cq, chatID, msgID, arg)
 	case "done_all":
 		h.cbDoneAll(ctx, cq, chatID, msgID)
+	case "undo":
+		h.cbUndo(ctx, cq, chatID, msgID, arg)
 	case "pre_delete":
 		h.cbPreDelete(ctx, chatID, arg)
 	case "confirm_delete":
@@ -594,6 +596,8 @@ func (h *Handler) handleDone(ctx context.Context, msg *tgbotapi.Message, user *d
 	}
 }
 
+func undoKey(habitID int64) string { return fmt.Sprintf("undo:%d", habitID) }
+
 func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
 	habitID, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
@@ -605,6 +609,10 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 		return
 	}
 	lang := h.lang(user)
+
+	// Capture state before marking done so we can undo
+	prevHabit, _ := h.habitUC.GetHabit(ctx, habitID)
+
 	if err := h.habitUC.MarkDone(ctx, user.ID, habitID); err != nil {
 		if errors.Is(err, domain.ErrAlreadyDone) {
 			h.editMsg(chatID, msgID, i18n.T(lang, "habit.already_done"))
@@ -614,13 +622,73 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	habit, err := h.habitUC.GetHabit(ctx, habitID)
-	msg := i18n.T(lang, "habit.done_simple")
-	if err == nil {
-		msg = doneMessage(habit.Name, habit.Streak, habit.GoalDays, lang)
+
+	// Store undo state in Redis for 5 minutes
+	if prevHabit != nil {
+		var prevTS int64
+		if prevHabit.LastDoneAt != nil {
+			prevTS = prevHabit.LastDoneAt.Unix()
+		}
+		undoVal := fmt.Sprintf("%d|%d", prevHabit.Streak, prevTS)
+		_ = h.cache.Set(ctx, undoKey(habitID), undoVal, 5*time.Minute)
 	}
-	// Replace the keyboard with the result message
-	h.editMsg(chatID, msgID, msg)
+
+	habit, err := h.habitUC.GetHabit(ctx, habitID)
+	doneMsg := i18n.T(lang, "habit.done_simple")
+	if err == nil {
+		doneMsg = doneMessage(habit.Name, habit.Streak, habit.GoalDays, lang)
+	}
+	edit := tgbotapi.NewEditMessageText(chatID, msgID, doneMsg)
+	if prevHabit != nil {
+		kb := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "habit.undo_btn"), fmt.Sprintf("undo:%d", habitID)),
+		))
+		edit.ReplyMarkup = &kb
+	}
+	if _, err := h.api.Send(edit); err != nil {
+		h.logger.Error("edit done msg", zap.Error(err))
+	}
+}
+
+func (h *Handler) cbUndo(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	habitID, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return
+	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.logger.Error("GetOrCreateUser cbUndo", zap.Error(err))
+		return
+	}
+	lang := h.lang(user)
+
+	val, err := h.cache.Get(ctx, undoKey(habitID))
+	if err != nil {
+		// TTL expired or never set
+		h.editMsg(chatID, msgID, i18n.T(lang, "habit.undo_expired"))
+		return
+	}
+	_ = h.cache.Delete(ctx, undoKey(habitID))
+
+	parts := strings.SplitN(val, "|", 2)
+	if len(parts) != 2 {
+		h.editMsg(chatID, msgID, i18n.T(lang, "error.generic"))
+		return
+	}
+	prevStreak, _ := strconv.Atoi(parts[0])
+	prevTS, _ := strconv.ParseInt(parts[1], 10, 64)
+	var prevLastDoneAt *time.Time
+	if prevTS != 0 {
+		t := time.Unix(prevTS, 0)
+		prevLastDoneAt = &t
+	}
+
+	if err := h.habitUC.UndoMarkDone(ctx, user.ID, habitID, prevStreak, prevLastDoneAt); err != nil {
+		h.logger.Error("UndoMarkDone", zap.Error(err))
+		h.editMsg(chatID, msgID, i18n.T(lang, "error.generic"))
+		return
+	}
+	h.editMsg(chatID, msgID, i18n.T(lang, "habit.undo_done"))
 }
 
 func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {

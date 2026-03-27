@@ -41,6 +41,7 @@ type ActivityRepository interface {
 	ListDatesByHabitAndDateRange(ctx context.Context, habitID int64, from, to time.Time) ([]time.Time, error)
 	CountAllByUser(ctx context.Context, userID int64) (int, error)
 	GetAverageCompletionHour(ctx context.Context, habitID int64) (hour int, hasData bool, err error)
+	DeleteTodayActivity(ctx context.Context, habitID int64, date time.Time) error
 }
 
 type Cache interface {
