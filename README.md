@@ -1,6 +1,6 @@
-# Habbit Tracker Bot
+# Habit Tracker Bot
 
-Telegram-бот для формирования привычек. Напоминает в активные часы, считает стрики, не беспокоит ночью.
+Telegram-бот для формирования привычек. Напоминает в активные часы, считает стрики, поддерживает русский/английский/казахский язык.
 
 **Стек:** Go · PostgreSQL · Redis · Uber FX · Clean Architecture
 
@@ -15,18 +15,13 @@ cp .env.example .env
 make docker-up
 ```
 
-`docker-compose` автоматически запускает postgres → применяет миграции → стартует бот.
+`docker-compose` автоматически: postgres → миграции → бот.
 
 ## Локальная разработка
 
 ```bash
-# Поднять инфраструктуру
 docker-compose up postgres redis -d
-
-# Применить миграции
 make migrate
-
-# Запустить бота
 export TELEGRAM_TOKEN=...
 export DB_DSN=postgres://user:pass@localhost:5432/habbit?sslmode=disable
 make run
@@ -52,13 +47,13 @@ make run
 
 ## Переменные окружения
 
-| Переменная | Обязательная | По умолчанию | Описание |
-|------------|:---:|---|---|
-| `TELEGRAM_TOKEN` | ✅ | — | Токен от @BotFather |
-| `DB_DSN` | ✅ | — | DSN postgres (в Docker: `@postgres:5432`) |
-| `MIGRATE_DSN` | ❌ | `postgres://user:pass@localhost:5432/habbit?sslmode=disable` | DSN для `make migrate` |
-| `REDIS_ADDR` | ❌ | `localhost:6379` | Адрес Redis |
-| `TIMEZONE` | ❌ | `UTC` | Часовой пояс (напр. `Asia/Tashkent`, `Europe/Moscow`) |
+| Переменная | Обязательная | По умолчанию |
+|------------|:---:|---|
+| `TELEGRAM_TOKEN` | ✅ | — |
+| `DB_DSN` | ✅ | — |
+| `MIGRATE_DSN` | ❌ | `postgres://user:pass@localhost:5432/habbit?sslmode=disable` |
+| `REDIS_ADDR` | ❌ | `localhost:6379` |
+| `TIMEZONE` | ❌ | `UTC` |
 
 ---
 
@@ -66,20 +61,55 @@ make run
 
 | Команда | Описание |
 |---------|----------|
-| `/start` | Приветствие и описание бота |
-| `/add_habit` | Добавить привычку (название → интервал → время активности) |
-| `/list_habits` | Список привычек с прогрессом и стриком |
-| `/done` | Отметить привычку выполненной |
+| `/start` | Онбординг нового пользователя (язык → часовой пояс → первая привычка) |
+| `/add_habit` | Добавить привычку (шаблоны или custom: название → интервал → часы активности) |
+| `/list_habits` | Список привычек со статусом, стриком, меню паузы/редактирования |
+| `/done` | Отметить привычку выполненной (с кнопкой отмены в течение 5 мин) |
+| `/today` | Только невыполненные привычки на сегодня + кнопка "Все выполнены" |
+| `/stats` | Статистика за 30 дней: прогресс-бар, стрик, рекорд, XP/уровень/щиты |
+| `/history` | ASCII-тепловая карта выполнений за 28 дней |
+| `/achievements` | Список заработанных достижений |
+| `/language` | Сменить язык (🇷🇺 / 🇬🇧 / 🇰🇿) |
+| `/timezone` | Сменить часовой пояс |
+| `/edit_habit` | Изменить название, интервал или часы активности |
+| `/pause_habit` | Приостановить напоминания |
+| `/resume_habit` | Возобновить напоминания |
 | `/delete_habit` | Удалить привычку |
-| `/health` | Проверка работоспособности |
 
 ### Создание привычки
 
 `/add_habit` запускает пошаговый флоу:
-1. Бот просит ввести название
-2. Выбор интервала напоминаний (30 мин / 1ч / 2ч / 3ч)
-3. Выбор начала активного времени (7:00–10:00)
-4. Выбор конца активного времени (20:00–23:00)
+1. Выбор шаблона (вода, зарядка, чтение, сон, медитация) или кастомный
+2. Название (для кастомного)
+3. Интервал напоминаний (30 мин / 1ч / 2ч / 3ч / 4ч / 8ч)
+4. Начало активного времени
+5. Конец активного времени
+6. Цель (30 / 66 / 100 дней — опционально)
+
+### Таймер
+
+В `/today` и напоминаниях рядом с кнопкой выполнения появляется `⏱`. Тап запускает обратный отсчёт (15/30/45/60 мин) — по окончании привычка отмечается автоматически.
+
+---
+
+## Геймификация
+
+- **XP и уровни** — каждое выполнение приносит XP (+10 базовых + бонус за стрик до +20)
+- **Достижения** — `first_done`, `streak_7`, `streak_30`, `streak_100`, `perfect_week`, `early_bird`, `completionist`
+- **Щиты стрика** — защищают стрик от сброса (начальный запас: 3). Пополняются через достижения
+- **Рекорд стрика** — в `/stats` отображается лучший стрик за всё время
+
+---
+
+## Уведомления
+
+| Время | Событие |
+|-------|---------|
+| 08:00 | Утренний дайджест — список привычек на день |
+| 20:00 | Предупреждение о стриках под угрозой |
+| 21:00 (настраивается) | Вечерний итог дня с процентом выполнения |
+| Воскресенье 20:00 | Итоги недели |
+| Полночь | Сброс стриков (с проверкой щитов) |
 
 ---
 
@@ -89,19 +119,18 @@ make run
 delivery → usecase → domain
 repository → usecase (через интерфейсы)
 scheduler → usecase
+gamification → usecase (callback после MarkDone)
 ```
 
 ```
-cmd/main.go                  точка входа
-cmd/migrate/main.go          CLI для миграций
-internal/app/app.go          FX wiring
-internal/domain/             сущности + ошибки
+internal/domain/             сущности (User, Habit, Activity, UserAchievement) + ошибки
 internal/usecase/            бизнес-логика, интерфейсы репозиториев
-internal/delivery/telegram/  polling, роутинг, conversation state
+internal/delivery/telegram/  polling, роутинг, conversation state (Redis)
 internal/repository/         postgres + redis реализации
-internal/scheduler/          тикер каждую минуту, напоминания
-internal/infrastructure/     config, logger
-migrations/                  *.up.sql / *.down.sql
+internal/scheduler/          тикер каждую минуту, все уведомления
+internal/i18n/               переводы RU/EN/KZ
+internal/gamification/       XP, уровни, достижения
+migrations/                  *.up.sql / *.down.sql (текущая: 004_gamification)
 ```
 
 ---
@@ -119,13 +148,4 @@ migrations/                  *.up.sql / *.down.sql
 
 ### Секреты (Settings → Secrets → Actions)
 
-| Секрет | Описание |
-|--------|----------|
-| `SERVER_HOST` | IP или hostname VPS |
-| `SERVER_USER` | SSH-пользователь |
-| `SERVER_SSH_KEY` | Приватный SSH-ключ |
-| `DEPLOY_PATH` | Путь на сервере (напр. `/opt/habbit-tracker-bot`) |
-| `TELEGRAM_TOKEN` | Токен бота |
-| `DB_DSN` | DSN postgres |
-| `REDIS_ADDR` | Адрес Redis (опц.) |
-| `TIMEZONE` | Часовой пояс (напр. `Asia/Almaty`) |
+`SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY`, `DEPLOY_PATH`, `TELEGRAM_TOKEN`, `DB_DSN`, `REDIS_ADDR`, `TIMEZONE`
