@@ -59,6 +59,7 @@ var enMessages = map[string]string{
 	"today.header":             "📋 Today's habits:\n\n",
 	"today.all_done":           "✅ All habits done today! Great job.",
 	"today.none":               "No active habits. Add one: /add_habit",
+	"today.done_all_btn":       "✅ Mark all done",
 	"stats.header":             "📊 Statistics (last 30 days):\n\n",
 	"stats.empty":              "No data yet. Start tracking habits.",
 	"stats.xp_level":           "\n⭐ Level %d · %d XP\n🛡 Shields: %d",

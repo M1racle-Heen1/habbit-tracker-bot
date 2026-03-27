@@ -59,6 +59,7 @@ var kzMessages = map[string]string{
 	"today.header":             "📋 Бүгінгі әдеттер:\n\n",
 	"today.all_done":           "✅ Бүгінгі барлық әдеттер орындалды! Керемет.",
 	"today.none":               "Белсенді әдеттер жоқ. Қосыңыз: /add_habit",
+	"today.done_all_btn":       "✅ Барлығын орындалды деп белгілеу",
 	"stats.header":             "📊 Статистика (соңғы 30 күн):\n\n",
 	"stats.empty":              "Деректер жоқ. Әдеттерді бақылауды бастаңыз.",
 	"stats.xp_level":           "\n⭐ Деңгей %d · %d XP\n🛡 Қалқандар: %d",

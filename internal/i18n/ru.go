@@ -59,6 +59,7 @@ var ruMessages = map[string]string{
 	"today.header":             "📋 Привычки на сегодня:\n\n",
 	"today.all_done":           "✅ Все привычки выполнены! Отличная работа.",
 	"today.none":               "Нет активных привычек. Добавь: /add_habit",
+	"today.done_all_btn":       "✅ Все выполнены",
 	"stats.header":             "📊 Статистика за 30 дней:\n\n",
 	"stats.empty":              "Нет данных. Начни отслеживать привычки.",
 	"stats.xp_level":           "\n⭐ Уровень %d · %d XP\n🛡 Щиты: %d",

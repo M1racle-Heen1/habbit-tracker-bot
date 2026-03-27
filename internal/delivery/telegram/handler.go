@@ -291,6 +291,8 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbTemplate(ctx, cq, chatID, msgID, arg)
 	case "done":
 		h.cbDone(ctx, cq, chatID, msgID, arg)
+	case "done_all":
+		h.cbDoneAll(ctx, cq, chatID, msgID)
 	case "pre_delete":
 		h.cbPreDelete(ctx, chatID, arg)
 	case "confirm_delete":
@@ -619,6 +621,32 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 	}
 	// Replace the keyboard with the result message
 	h.editMsg(chatID, msgID, msg)
+}
+
+func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.logger.Error("GetOrCreateUser cbDoneAll", zap.Error(err))
+		return
+	}
+	lang := h.lang(user)
+	habits, err := h.habitUC.ListHabits(ctx, user.ID)
+	if err != nil {
+		h.editMsg(chatID, msgID, i18n.T(lang, "error.generic"))
+		return
+	}
+	now := time.Now()
+	marked := 0
+	for _, habit := range habits {
+		if habit.IsPaused || usecase.IsDoneToday(habit, now) {
+			continue
+		}
+		if err := h.habitUC.MarkDone(ctx, user.ID, habit.ID); err == nil {
+			marked++
+		}
+	}
+	h.editMsg(chatID, msgID, i18n.T(lang, "today.all_done"))
+	_ = marked
 }
 
 // ── List habits ───────────────────────────────────────────────────────────────
@@ -1169,6 +1197,11 @@ func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *
 	if pending == 0 {
 		h.send(msg.Chat.ID, i18n.T(lang, "today.all_done"))
 		return
+	}
+	if pending >= 2 {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "today.done_all_btn"), "done_all:1"),
+		))
 	}
 	m := tgbotapi.NewMessage(msg.Chat.ID, sb.String())
 	if len(rows) > 0 {
