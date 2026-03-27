@@ -101,6 +101,11 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			s.maybeSendWeeklyDigest(ctx, g.telegramID, g.userID, g.habits, userNow, lang)
 		}
 
+		// Streak-at-risk alert at 20:00
+		if userNow.Hour() == 20 && userNow.Minute() == 0 {
+			s.maybeSendStreakRisk(ctx, g.telegramID, lang, g.habits, userNow)
+		}
+
 		// Evening recap at user-configured hour
 		if g.eveningRecapHour > 0 && userNow.Hour() == g.eveningRecapHour && userNow.Minute() == 0 {
 			s.maybeSendEveningRecap(ctx, g.telegramID, g.userID, lang, g.habits, userNow)
@@ -314,6 +319,50 @@ func (s *Scheduler) maybeSendEveningRecap(ctx context.Context, telegramID int64,
 
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send evening recap", zap.Int64("telegram_id", telegramID), zap.Error(err))
+	}
+}
+
+func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, lang string, habits []*domain.HabitWithTelegramID, now time.Time) {
+	key := fmt.Sprintf("streak_risk:%d:%s", telegramID, now.Format("2006-01-02"))
+	if _, err := s.cache.Get(ctx, key); err == nil {
+		return
+	}
+
+	var at_risk []struct {
+		name   string
+		streak int
+	}
+	for _, hw := range habits {
+		if hw.IsPaused || hw.Streak == 0 {
+			continue
+		}
+		if !usecase.IsDoneToday(&hw.Habit, now) {
+			at_risk = append(at_risk, struct {
+				name   string
+				streak int
+			}{hw.Name, hw.Streak})
+		}
+	}
+	if len(at_risk) == 0 {
+		return
+	}
+
+	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
+		s.logger.Warn("streak risk cache set", zap.Error(err))
+	}
+
+	if lang == "" {
+		lang = i18n.RU
+	}
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "streak.risk_header"))
+	for _, r := range at_risk {
+		sb.WriteString(i18n.T(lang, "streak.risk_line", r.name, r.streak))
+	}
+	sb.WriteString(i18n.T(lang, "streak.risk_footer"))
+
+	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
+		s.logger.Error("send streak risk", zap.Int64("telegram_id", telegramID), zap.Error(err))
 	}
 }
 

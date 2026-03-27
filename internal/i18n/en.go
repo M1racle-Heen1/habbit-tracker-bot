@@ -63,6 +63,7 @@ var enMessages = map[string]string{
 	"stats.header":             "📊 Statistics (last 30 days):\n\n",
 	"stats.empty":              "No data yet. Start tracking habits.",
 	"stats.xp_level":           "\n⭐ Level %d · %d XP\n🛡 Shields: %d",
+	"stats.streak_line":        "   🔥 %d days  🏆 best: %d days\n",
 	"history.header":           "📅 %s — last 28 days:\n",
 	"history.legend":           "■ done  □ missed",
 	"history.empty":            "No history yet.",
@@ -93,4 +94,7 @@ var enMessages = map[string]string{
 	"evening.nudge":            "\nDon't give up — tomorrow is a new chance! 💫",
 	"streak.broken":            "😔 «%s» streak broken (was %d days).\nDon't give up! Start again today.",
 	"streak.do_now":            "✅ Do it now",
+	"streak.risk_header":       "⚠️ Streak at risk!\n\nNot done today:\n",
+	"streak.risk_line":         "🔥 %s — %d days\n",
+	"streak.risk_footer":       "\nDo it now to keep your streak!",
 }

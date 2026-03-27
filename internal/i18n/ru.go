@@ -63,6 +63,7 @@ var ruMessages = map[string]string{
 	"stats.header":             "📊 Статистика за 30 дней:\n\n",
 	"stats.empty":              "Нет данных. Начни отслеживать привычки.",
 	"stats.xp_level":           "\n⭐ Уровень %d · %d XP\n🛡 Щиты: %d",
+	"stats.streak_line":        "   🔥 %d дн.  🏆 рекорд: %d дн.\n",
 	"history.header":           "📅 %s — последние 28 дней:\n",
 	"history.legend":           "■ выполнено  □ пропущено",
 	"history.empty":            "Нет истории.",
@@ -93,4 +94,7 @@ var ruMessages = map[string]string{
 	"evening.nudge":            "\nНе сдавайся, завтра — новый шанс! 💫",
 	"streak.broken":            "😔 Стрик «%s» прервался (был %d дней).\nНе сдавайся! Начни снова сегодня.",
 	"streak.do_now":            "✅ Выполнить сейчас",
+	"streak.risk_header":       "⚠️ Стрик под угрозой!\n\nЕщё не выполнено сегодня:\n",
+	"streak.risk_line":         "🔥 %s — %d дн.\n",
+	"streak.risk_footer":       "\nВыполни сейчас, чтобы не потерять стрик!",
 }

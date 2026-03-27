@@ -63,6 +63,7 @@ var kzMessages = map[string]string{
 	"stats.header":             "📊 Статистика (соңғы 30 күн):\n\n",
 	"stats.empty":              "Деректер жоқ. Әдеттерді бақылауды бастаңыз.",
 	"stats.xp_level":           "\n⭐ Деңгей %d · %d XP\n🛡 Қалқандар: %d",
+	"stats.streak_line":        "   🔥 %d күн  🏆 рекорд: %d күн\n",
 	"history.header":           "📅 %s — соңғы 28 күн:\n",
 	"history.legend":           "■ орындалды  □ өткізілді",
 	"history.empty":            "Тарих жоқ.",
@@ -93,4 +94,7 @@ var kzMessages = map[string]string{
 	"evening.nudge":            "\nТастама — ертең жаңа мүмкіндік! 💫",
 	"streak.broken":            "😔 «%s» сериясы үзілді (%d күн болды).\nТастама! Бүгін қайтадан бастаңыз.",
 	"streak.do_now":            "✅ Қазір орында",
+	"streak.risk_header":       "⚠️ Серия қауіп астында!\n\nБүгін орындалмады:\n",
+	"streak.risk_line":         "🔥 %s — %d күн\n",
+	"streak.risk_footer":       "\nСерияны сақтау үшін қазір орындаңыз!",
 }

@@ -1049,6 +1049,9 @@ func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *
 			goalBar := progressBar(s.Habit.Streak, s.Habit.GoalDays)
 			sb.WriteString(fmt.Sprintf("   🎯 %s %d/%d days\n", goalBar, s.Habit.Streak, s.Habit.GoalDays))
 		}
+		if s.Habit.Streak > 0 || s.Habit.BestStreak > 0 {
+			sb.WriteString(i18n.T(lang, "stats.streak_line", s.Habit.Streak, s.Habit.BestStreak))
+		}
 		sb.WriteString("\n")
 	}
 	sb.WriteString(i18n.T(lang, "stats.xp_level", user.Level, user.XP, user.StreakShields))
