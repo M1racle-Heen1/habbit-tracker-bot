@@ -985,16 +985,13 @@ func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "stats.header"))
 	for _, s := range stats {
-		bar := progressBar(s.CompletionPct)
-		sb.WriteString(fmt.Sprintf("%s %s\n", bar, s.Habit.Name))
-		sb.WriteString(fmt.Sprintf("  %d/%d дней (%d%%)", s.CompletedDays, s.TotalDays, s.CompletionPct))
-		if s.Habit.BestStreak > 0 {
-			sb.WriteString(fmt.Sprintf(" | лучший: %d", s.Habit.BestStreak))
+		bar := progressBar(s.CompletedDays, s.TotalDays)
+		sb.WriteString(fmt.Sprintf("%s  %s  %d/%d (%d%%)\n", s.Habit.Name, bar, s.CompletedDays, s.TotalDays, s.CompletionPct))
+		if s.Habit.GoalDays > 0 {
+			goalBar := progressBar(s.Habit.Streak, s.Habit.GoalDays)
+			sb.WriteString(fmt.Sprintf("   🎯 %s %d/%d days\n", goalBar, s.Habit.Streak, s.Habit.GoalDays))
 		}
-		if s.Habit.Streak > 0 {
-			sb.WriteString(fmt.Sprintf(" | сейчас: %d🔥", s.Habit.Streak))
-		}
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
 	}
 	sb.WriteString(i18n.T(lang, "stats.xp_level", user.Level, user.XP, user.StreakShields))
 	h.send(msg.Chat.ID, sb.String())
@@ -1028,54 +1025,31 @@ func (h *Handler) cbHistory(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 	}
 	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
 	if err != nil {
-		h.send(chatID, "Ошибка.")
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
 		return
 	}
+	lang := h.lang(user)
 	habit, err := h.habitUC.GetHabit(ctx, habitID)
 	if err != nil {
-		h.send(chatID, "Привычка не найдена.")
+		h.send(chatID, i18n.T(lang, "habit.not_found"))
 		return
 	}
 
 	now := time.Now()
-	from := now.AddDate(0, 0, -29)
-	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
-	to := now.AddDate(0, 0, 1)
-
-	dates, err := h.habitUC.GetHistory(ctx, user.ID, habitID, from, to)
+	from := now.AddDate(0, 0, -27)
+	dates, err := h.habitUC.GetHistory(ctx, user.ID, habitID, from, now.AddDate(0, 0, 1))
 	if err != nil {
 		h.logger.Error("GetHistory", zap.Error(err))
-		h.send(chatID, "Не удалось загрузить историю.")
+		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
 
-	doneSet := make(map[string]bool)
+	doneSet := make(map[string]bool, len(dates))
 	for _, d := range dates {
 		doneSet[d.Format("2006-01-02")] = true
 	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📅 %s — последние 30 дней\n\n", habit.Name))
-
-	for row := 0; row < 3; row++ {
-		for col := 0; col < 10; col++ {
-			day := from.AddDate(0, 0, row*10+col)
-			if doneSet[day.Format("2006-01-02")] {
-				sb.WriteString("✅")
-			} else if day.After(now) {
-				sb.WriteString("  ")
-			} else {
-				sb.WriteString("○")
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	total := len(dates)
-	sb.WriteString(fmt.Sprintf("\n📊 %d/30 дней (%d%%) | Стрик: %d | Лучший: %d",
-		total, total*100/30, habit.Streak, habit.BestStreak))
-
-	h.send(chatID, sb.String())
+	text := buildHeatmap(habit.Name, from, now, doneSet, lang)
+	h.send(chatID, text)
 }
 
 // ── Goal ──────────────────────────────────────────────────────────────────────
@@ -1444,10 +1418,49 @@ func formatInterval(minutes int) string {
 	}
 }
 
-func progressBar(pct int) string {
-	filled := pct / 10
-	if filled > 10 {
-		filled = 10
+func progressBar(done, total int) string {
+	const width = 10
+	if total == 0 {
+		return strings.Repeat("░", width)
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
+	filled := done * width / total
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+func buildHeatmap(habitName string, from, to time.Time, doneSet map[string]bool, lang string) string {
+	weekdays := []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
+	start := from
+	for start.Weekday() != time.Monday {
+		start = start.AddDate(0, 0, -1)
+	}
+	grid := [7][4]string{}
+	for row := 0; row < 7; row++ {
+		for col := 0; col < 4; col++ {
+			day := start.AddDate(0, 0, col*7+row)
+			if day.After(to) {
+				grid[row][col] = " "
+				continue
+			}
+			if doneSet[day.Format("2006-01-02")] {
+				grid[row][col] = "■"
+			} else {
+				grid[row][col] = "□"
+			}
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "history.header", habitName))
+	sb.WriteString("\n")
+	for row := 0; row < 7; row++ {
+		sb.WriteString(weekdays[row] + " ")
+		for col := 0; col < 4; col++ {
+			sb.WriteString(grid[row][col] + " ")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(i18n.T(lang, "history.legend"))
+	return sb.String()
 }
