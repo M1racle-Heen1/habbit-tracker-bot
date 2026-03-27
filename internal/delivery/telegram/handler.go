@@ -32,6 +32,8 @@ const (
 	stepAwaitGoal
 	stepEditAwaitName
 	stepEditAwaitEndHour // separate from stepAwaitEndHour to prevent cross-flow conflicts
+	stepOnboardTimezone  // new user: waiting for timezone after language chosen
+	stepOnboardHabit     // new user: waiting for Yes/Later on first habit
 )
 
 type convState struct {
@@ -305,6 +307,10 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbLanguage(ctx, cq, chatID, msgID, arg)
 	case "tz":
 		h.cbTimezone(ctx, cq, chatID, msgID, arg)
+	case "tz_ob":
+		h.cbOnboardTimezone(ctx, cq, chatID, msgID, arg)
+	case "onboard_habit":
+		h.cbOnboardHabit(ctx, cq, chatID, msgID, arg)
 	case "history":
 		h.cbHistory(ctx, cq, chatID, arg)
 	case "edit":
@@ -331,6 +337,7 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *
 
 	isNew := time.Since(user.CreatedAt) < 60*time.Second
 	if isNew {
+		h.setState(msg.From.ID, &convState{Step: stepOnboardTimezone})
 		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "language.choose"))
 		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
@@ -385,6 +392,29 @@ func (h *Handler) cbLanguage(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	}
 	labels := map[string]string{"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "kz": "🇰🇿 Қазақша"}
 	h.editMsg(chatID, msgID, "✅ "+labels[arg])
+
+	state := h.getState(cq.From.ID)
+	if state != nil && state.Step == stepOnboardTimezone {
+		h.sendOnboardTimezone(chatID, arg)
+	}
+}
+
+func (h *Handler) sendOnboardTimezone(chatID int64, lang string) {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "timezone.choose"))
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < len(commonTimezones); i += 2 {
+		row := []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i].Label, "tz_ob:"+commonTimezones[i].Value),
+		}
+		if i+1 < len(commonTimezones) {
+			row = append(row, tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i+1].Label, "tz_ob:"+commonTimezones[i+1].Value))
+		}
+		rows = append(rows, row)
+	}
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send onboard timezone", zap.Error(err))
+	}
 }
 
 func (h *Handler) startAddHabit(msg *tgbotapi.Message) {
@@ -1206,6 +1236,53 @@ func (h *Handler) cbTimezone(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		return
 	}
 	h.editMsg(chatID, msgID, fmt.Sprintf("✅ Часовой пояс: %s", tz))
+}
+
+func (h *Handler) cbOnboardTimezone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, tz string) {
+	if _, err := time.LoadLocation(tz); err != nil {
+		return
+	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	if err := h.userUC.SetTimezone(ctx, user.ID, tz); err != nil {
+		h.logger.Error("SetTimezone onboard", zap.Error(err))
+		h.send(chatID, i18n.T(h.lang(user), "error.generic"))
+		return
+	}
+	lang := h.lang(user)
+	h.editMsg(chatID, msgID, i18n.T(lang, "timezone.set", tz))
+	h.setState(cq.From.ID, &convState{Step: stepOnboardHabit})
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "onboarding.first_habit"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "onboarding.add_yes"), "onboard_habit:yes"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "onboarding.add_later"), "onboard_habit:later"),
+	))
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send onboard first habit prompt", zap.Error(err))
+	}
+}
+
+func (h *Handler) cbOnboardHabit(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
+	h.clearState(cq.From.ID)
+	h.removeKeyboard(chatID, msgID)
+	if arg == "yes" {
+		m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
+		m.ReplyMarkup = templateKeyboard()
+		if _, err := h.api.Send(m); err != nil {
+			h.logger.Error("send template keyboard onboard", zap.Error(err))
+		}
+	} else {
+		h.send(chatID, i18n.T(lang, "onboarding.welcome_new", user.FirstName))
+	}
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
