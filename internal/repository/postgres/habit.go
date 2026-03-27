@@ -141,7 +141,7 @@ func (r *HabitRepository) ListAllWithTelegramID(ctx context.Context) ([]*domain.
 	rows, err := r.pool.Query(ctx,
 		`SELECT h.id, h.user_id, h.name, h.description, h.interval_minutes, h.start_hour, h.end_hour,
 		        h.last_done_at, h.last_notified_at, h.streak, h.best_streak, h.is_paused, h.goal_days, h.snooze_until, h.created_at,
-		        u.telegram_id, u.timezone, u.first_name
+		        u.telegram_id, u.timezone, u.first_name, u.language, u.id, u.evening_recap_hour
 		 FROM habits h JOIN users u ON u.id = h.user_id`,
 	)
 	if err != nil {
@@ -164,7 +164,7 @@ func (r *HabitRepository) ListStreaksToBeReset(ctx context.Context) ([]*domain.H
 	rows, err := r.pool.Query(ctx,
 		`SELECT h.id, h.user_id, h.name, h.description, h.interval_minutes, h.start_hour, h.end_hour,
 		        h.last_done_at, h.last_notified_at, h.streak, h.best_streak, h.is_paused, h.goal_days, h.snooze_until, h.created_at,
-		        u.telegram_id, u.timezone, u.first_name
+		        u.telegram_id, u.timezone, u.first_name, u.language, u.id, u.evening_recap_hour
 		 FROM habits h JOIN users u ON u.id = h.user_id
 		 WHERE h.streak > 0
 		   AND (h.last_done_at IS NULL OR h.last_done_at::date < CURRENT_DATE - INTERVAL '1 day')`,
@@ -187,6 +187,7 @@ func scanHabitsWithUser(rows pgx.Rows) ([]*domain.HabitWithTelegramID, error) {
 			&hw.Streak, &hw.BestStreak, &hw.IsPaused, &hw.GoalDays, &hw.SnoozeUntil,
 			&hw.CreatedAt,
 			&hw.TelegramID, &hw.UserTimezone, &hw.UserFirstName,
+			&hw.UserLanguage, &hw.UserID, &hw.EveningRecapHour,
 		); err != nil {
 			return nil, err
 		}

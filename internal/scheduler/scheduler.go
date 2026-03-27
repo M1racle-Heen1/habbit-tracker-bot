@@ -10,19 +10,21 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/saidakmal/habbit-tracker-bot/internal/domain"
+	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
 	"github.com/saidakmal/habbit-tracker-bot/internal/usecase"
 )
 
 type Scheduler struct {
 	habitUC  *usecase.HabitUsecase
+	userUC   *usecase.UserUsecase
 	api      *tgbotapi.BotAPI
 	logger   *zap.Logger
 	location *time.Location
 	cache    usecase.Cache
 }
 
-func New(habitUC *usecase.HabitUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, loc *time.Location, cache usecase.Cache) *Scheduler {
-	return &Scheduler{habitUC: habitUC, api: api, logger: logger, location: loc, cache: cache}
+func New(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, loc *time.Location, cache usecase.Cache) *Scheduler {
+	return &Scheduler{habitUC: habitUC, userUC: userUC, api: api, logger: logger, location: loc, cache: cache}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
@@ -54,18 +56,24 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 
 	// Group habits by user
 	type userGroup struct {
-		telegramID    int64
-		firstName     string
-		userTimezone  string
-		habits        []*domain.HabitWithTelegramID
+		telegramID       int64
+		firstName        string
+		userTimezone     string
+		userLang         string
+		userID           int64
+		eveningRecapHour int
+		habits           []*domain.HabitWithTelegramID
 	}
 	groups := make(map[int64]*userGroup)
 	for _, hw := range habits {
 		if _, ok := groups[hw.UserID]; !ok {
 			groups[hw.UserID] = &userGroup{
-				telegramID:   hw.TelegramID,
-				firstName:    hw.UserFirstName,
-				userTimezone: hw.UserTimezone,
+				telegramID:       hw.TelegramID,
+				firstName:        hw.UserFirstName,
+				userTimezone:     hw.UserTimezone,
+				userLang:         hw.UserLanguage,
+				userID:           hw.UserID,
+				eveningRecapHour: hw.EveningRecapHour,
 			}
 		}
 		groups[hw.UserID].habits = append(groups[hw.UserID].habits, hw)
@@ -78,14 +86,24 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 		}
 		userNow := now.In(loc)
 
+		lang := g.userLang
+		if lang == "" {
+			lang = i18n.RU
+		}
+
 		// Morning digest at 8:00
 		if userNow.Hour() == 8 && userNow.Minute() == 0 {
-			s.maybeSendMorningDigest(ctx, g.telegramID, g.firstName, g.habits, userNow)
+			s.maybeSendMorningDigest(ctx, g.telegramID, g.firstName, g.habits, userNow, lang)
 		}
 
 		// Weekly digest on Sundays at 20:00
 		if userNow.Weekday() == time.Sunday && userNow.Hour() == 20 && userNow.Minute() == 0 {
-			s.maybeSendWeeklyDigest(ctx, g.telegramID, g.habits[0].UserID, g.habits, userNow)
+			s.maybeSendWeeklyDigest(ctx, g.telegramID, g.userID, g.habits, userNow, lang)
+		}
+
+		// Evening recap at user-configured hour
+		if g.eveningRecapHour > 0 && userNow.Hour() == g.eveningRecapHour && userNow.Minute() == 0 {
+			s.maybeSendEveningRecap(ctx, g.telegramID, g.userID, lang, g.habits, userNow)
 		}
 
 		// Per-habit reminders
@@ -96,36 +114,50 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			if hw.SnoozeUntil != nil && now.Before(*hw.SnoozeUntil) {
 				continue
 			}
-			if !usecase.IsInActiveHours(&hw.Habit, userNow) {
+
+			adaptiveHour, hasAdaptive, err := s.habitUC.GetActivityAverageHour(ctx, hw.ID)
+			if err != nil {
+				adaptiveHour = hw.StartHour
+				hasAdaptive = false
+			}
+			effectiveStartHour := hw.StartHour
+			if hasAdaptive && adaptiveHour > hw.StartHour && adaptiveHour < hw.EndHour {
+				effectiveStartHour = adaptiveHour - 1
+				if effectiveStartHour < hw.StartHour {
+					effectiveStartHour = hw.StartHour
+				}
+			}
+			if !usecase.IsInActiveHoursFrom(&hw.Habit, userNow, effectiveStartHour) {
 				continue
 			}
+
 			if usecase.IsDoneToday(&hw.Habit, userNow) {
 				continue
 			}
 			if !usecase.IsFinalReminder(&hw.Habit, userNow) && !usecase.ShouldSendInterval(&hw.Habit, userNow) {
 				continue
 			}
-			s.sendReminder(ctx, hw.TelegramID, &hw.Habit)
+			s.sendReminder(ctx, hw.TelegramID, &hw.Habit, lang)
 		}
 	}
 }
 
-func (s *Scheduler) sendReminder(ctx context.Context, telegramID int64, h *domain.Habit) {
+func (s *Scheduler) sendReminder(ctx context.Context, telegramID int64, h *domain.Habit, lang string) {
 	streakText := ""
 	if h.Streak > 0 {
-		streakText = fmt.Sprintf("\nСтрик: %d дней подряд 🔥", h.Streak)
+		streakText = i18n.T(lang, "reminder.streak", h.Streak)
 	}
-	text := fmt.Sprintf("⏰ «%s»%s", h.Name, streakText)
+	text := i18n.T(lang, "reminder.text", h.Name) + streakText
 
 	msg := tgbotapi.NewMessage(telegramID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Выполнено", fmt.Sprintf("done:%d", h.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "reminder.done_button"), fmt.Sprintf("done:%d", h.ID)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏰ +30 мин", fmt.Sprintf("snooze:%d:30", h.ID)),
-			tgbotapi.NewInlineKeyboardButtonData("⏰ +1 час", fmt.Sprintf("snooze:%d:60", h.ID)),
-			tgbotapi.NewInlineKeyboardButtonData("⏰ +2 часа", fmt.Sprintf("snooze:%d:120", h.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "snooze.30min"), fmt.Sprintf("snooze:%d:30", h.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "snooze.1hr"), fmt.Sprintf("snooze:%d:60", h.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "snooze.2hr"), fmt.Sprintf("snooze:%d:120", h.ID)),
 		),
 	)
 	if _, err := s.api.Send(msg); err != nil {
@@ -137,7 +169,7 @@ func (s *Scheduler) sendReminder(ctx context.Context, telegramID int64, h *domai
 	}
 }
 
-func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64, firstName string, habits []*domain.HabitWithTelegramID, now time.Time) {
+func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64, firstName string, habits []*domain.HabitWithTelegramID, now time.Time, lang string) {
 	key := fmt.Sprintf("morning:%d:%s", telegramID, now.Format("2006-01-02"))
 	if _, err := s.cache.Get(ctx, key); err == nil {
 		return // already sent today
@@ -147,7 +179,7 @@ func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("☀️ Доброе утро, %s!\n\nПривычки на сегодня:\n\n", firstName))
+	sb.WriteString(i18n.T(lang, "morning.header", firstName))
 
 	var doneButtons [][]tgbotapi.InlineKeyboardButton
 	for _, hw := range habits {
@@ -177,7 +209,7 @@ func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64
 	}
 }
 
-func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64, userID int64, habits []*domain.HabitWithTelegramID, now time.Time) {
+func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64, userID int64, habits []*domain.HabitWithTelegramID, now time.Time, lang string) {
 	year, week := now.ISOWeek()
 	key := fmt.Sprintf("weekly:%d:%d:%d", telegramID, year, week)
 	if _, err := s.cache.Get(ctx, key); err == nil {
@@ -187,7 +219,6 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 		s.logger.Warn("weekly digest cache set", zap.Error(err))
 	}
 
-	// Fetch stats once for this user (not inside the habit loop)
 	stats, err := s.habitUC.GetStats(ctx, userID, 7)
 	if err != nil {
 		s.logger.Error("weekly digest GetStats", zap.Int64("user_id", userID), zap.Error(err))
@@ -200,8 +231,7 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 
 	from := now.AddDate(0, 0, -6)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📊 Итоги недели (%s – %s)\n\n",
-		from.Format("02.01"), now.Format("02.01")))
+	sb.WriteString(i18n.T(lang, "weekly.header", from.Format("02.01"), now.Format("02.01")))
 
 	totalDone, totalPossible := 0, 0
 	for _, hw := range habits {
@@ -218,22 +248,76 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 		if st.CompletionPct < 50 {
 			icon = "⚠️"
 		}
-		sb.WriteString(fmt.Sprintf("%s %s: %d/7 (%d%%)\n", icon, hw.Name, st.CompletedDays, st.CompletionPct))
+		sb.WriteString(i18n.T(lang, "weekly.habit_line", icon, hw.Name, st.CompletedDays, st.CompletionPct))
 	}
 
 	if totalPossible == 0 {
 		return
 	}
 	overall := totalDone * 100 / totalPossible
-	sb.WriteString(fmt.Sprintf("\nОбщий результат: %d/%d (%d%%)", totalDone, totalPossible, overall))
+	sb.WriteString(i18n.T(lang, "weekly.overall", totalDone, totalPossible, overall))
 
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send weekly digest", zap.Int64("telegram_id", telegramID), zap.Error(err))
 	}
 }
 
+func (s *Scheduler) maybeSendEveningRecap(ctx context.Context, telegramID int64, userID int64, lang string, habits []*domain.HabitWithTelegramID, now time.Time) {
+	key := fmt.Sprintf("evening:%d:%s", telegramID, now.Format("2006-01-02"))
+	if _, err := s.cache.Get(ctx, key); err == nil {
+		return
+	}
+	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
+		s.logger.Warn("evening recap cache set", zap.Error(err))
+	}
+
+	if lang == "" {
+		lang = i18n.RU
+	}
+
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "evening.header"))
+
+	done, total := 0, 0
+	for _, hw := range habits {
+		if hw.IsPaused {
+			continue
+		}
+		total++
+		if usecase.IsDoneToday(&hw.Habit, now) {
+			done++
+			sb.WriteString(i18n.T(lang, "evening.done_line", hw.Name))
+		} else {
+			sb.WriteString(i18n.T(lang, "evening.missed_line", hw.Name))
+		}
+	}
+	if total == 0 {
+		return
+	}
+
+	pct := done * 100 / total
+	sb.WriteString(i18n.T(lang, "evening.summary", done, total, pct))
+
+	user, err := s.userUC.GetByID(ctx, userID)
+	if err == nil {
+		sb.WriteString(i18n.T(lang, "evening.shields", user.StreakShields))
+	}
+
+	switch {
+	case pct == 100:
+		sb.WriteString(i18n.T(lang, "evening.perfect"))
+	case pct >= 50:
+		sb.WriteString(i18n.T(lang, "evening.good"))
+	default:
+		sb.WriteString(i18n.T(lang, "evening.nudge"))
+	}
+
+	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
+		s.logger.Error("send evening recap", zap.Int64("telegram_id", telegramID), zap.Error(err))
+	}
+}
+
 func (s *Scheduler) resetStreaksAndNotify(ctx context.Context) {
-	// Get habits whose streaks will be broken BEFORE resetting
 	toNotify, err := s.habitUC.ListStreaksToBeReset(ctx)
 	if err != nil {
 		s.logger.Error("ListStreaksToBeReset", zap.Error(err))
@@ -244,14 +328,34 @@ func (s *Scheduler) resetStreaksAndNotify(ctx context.Context) {
 	}
 
 	for _, hw := range toNotify {
-		text := fmt.Sprintf(
-			"😔 Стрик «%s» прервался (был %d дней).\nНе сдавайся! Начни снова сегодня.",
-			hw.Name, hw.Streak,
-		)
+		user, err := s.userUC.GetByID(ctx, hw.UserID)
+		lang := i18n.RU
+		shields := 0
+		if err == nil {
+			lang = user.Language
+			if lang == "" {
+				lang = i18n.RU
+			}
+			shields = user.StreakShields
+		}
+
+		if shields > 0 {
+			newShields := shields - 1
+			if err := s.userUC.UpdateStreakShields(ctx, hw.UserID, newShields); err != nil {
+				s.logger.Warn("UpdateStreakShields", zap.Error(err))
+			}
+			text := i18n.T(lang, "shield.used", hw.Name, newShields)
+			if _, err := s.api.Send(tgbotapi.NewMessage(hw.TelegramID, text)); err != nil {
+				s.logger.Error("send shield used", zap.Int64("telegram_id", hw.TelegramID), zap.Error(err))
+			}
+			continue
+		}
+
+		text := i18n.T(lang, "streak.broken", hw.Name, hw.Streak)
 		msg := tgbotapi.NewMessage(hw.TelegramID, text)
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ Выполнить сейчас", fmt.Sprintf("done:%d", hw.ID)),
+				tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "streak.do_now"), fmt.Sprintf("done:%d", hw.ID)),
 			),
 		)
 		if _, err := s.api.Send(msg); err != nil {

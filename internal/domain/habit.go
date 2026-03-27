@@ -30,7 +30,10 @@ type Activity struct {
 
 type HabitWithTelegramID struct {
 	Habit
-	TelegramID    int64
-	UserTimezone  string
-	UserFirstName string
+	TelegramID       int64
+	UserTimezone     string
+	UserFirstName    string
+	UserLanguage     string
+	UserID           int64
+	EveningRecapHour int
 }

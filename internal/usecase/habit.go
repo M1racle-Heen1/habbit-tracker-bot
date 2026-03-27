@@ -230,6 +230,11 @@ func IsInActiveHours(h *domain.Habit, now time.Time) bool {
 	return now.Hour() >= h.StartHour && now.Hour() < h.EndHour
 }
 
+// IsInActiveHoursFrom reports whether now falls within [startHour, h.EndHour).
+func IsInActiveHoursFrom(h *domain.Habit, now time.Time, startHour int) bool {
+	return now.Hour() >= startHour && now.Hour() < h.EndHour
+}
+
 // ShouldSendInterval reports whether enough time has passed since the last notification.
 func ShouldSendInterval(h *domain.Habit, now time.Time) bool {
 	if h.LastNotifiedAt == nil {
@@ -251,6 +256,11 @@ func sameDay(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
+}
+
+// GetActivityAverageHour returns the average completion hour for a habit over the last 30 days.
+func (u *HabitUsecase) GetActivityAverageHour(ctx context.Context, habitID int64) (int, bool, error) {
+	return u.activityRepo.GetAverageCompletionHour(ctx, habitID)
 }
 
 // TrackHabit is kept for backward compatibility.
