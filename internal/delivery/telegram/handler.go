@@ -37,11 +37,12 @@ const (
 )
 
 type convState struct {
-	Step            step   `json:"step"`
-	HabitName       string `json:"habit_name"`
-	IntervalMinutes int    `json:"interval_minutes"`
-	StartHour       int    `json:"start_hour"`
-	EditHabitID     int64  `json:"edit_habit_id"`
+	Step            step        `json:"step"`
+	HabitName       string      `json:"habit_name"`
+	IntervalMinutes int         `json:"interval_minutes"`
+	StartHour       int         `json:"start_hour"`
+	EditHabitID     int64       `json:"edit_habit_id"`
+	Lang            i18n.Lang   `json:"lang"`
 }
 
 var habitTemplates = map[string]struct {
@@ -190,7 +191,7 @@ func (h *Handler) handleCommand(ctx context.Context, msg *tgbotapi.Message, user
 	case "list_habits", "habits":
 		h.handleListHabits(ctx, msg, user)
 	case "add_habit", "add":
-		h.startAddHabit(msg)
+		h.startAddHabit(msg, user)
 	case "done":
 		h.handleDone(ctx, msg, user)
 	case "delete_habit":
@@ -230,13 +231,16 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 	case stepAwaitName:
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			h.send(msg.Chat.ID, "Название не может быть пустым. Введи название:")
+			h.send(msg.Chat.ID, i18n.T(h.lang(user), "habit.name_empty"))
 			return
 		}
 		state.HabitName = name
 		state.Step = stepAwaitInterval
 		h.setState(msg.From.ID, state)
-		h.sendIntervalKeyboard(msg.Chat.ID)
+		if err := h.sendIntervalKeyboard(msg.Chat.ID, h.lang(user)); err != nil {
+			h.clearState(msg.From.ID)
+			h.send(msg.Chat.ID, i18n.T(h.lang(user), "error.generic"))
+		}
 
 	case stepEditAwaitName:
 		name := strings.TrimSpace(msg.Text)
@@ -425,8 +429,10 @@ func (h *Handler) sendOnboardTimezone(chatID int64, lang string) {
 	}
 }
 
-func (h *Handler) startAddHabit(msg *tgbotapi.Message) {
-	m := tgbotapi.NewMessage(msg.Chat.ID, "Выбери шаблон или создай свою привычку:")
+func (h *Handler) startAddHabit(msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	h.setState(msg.From.ID, &convState{Step: stepIdle, Lang: lang})
+	m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "habit.choose_template"))
 	m.ReplyMarkup = templateKeyboard()
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send template keyboard", zap.Error(err))
@@ -435,12 +441,16 @@ func (h *Handler) startAddHabit(msg *tgbotapi.Message) {
 
 func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
 	if arg == "custom" {
-		// Clear any existing wizard state and start fresh
+		user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+		if err != nil {
+			h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+			return
+		}
+		lang := h.lang(user)
 		h.clearState(cq.From.ID)
 		h.setState(cq.From.ID, &convState{Step: stepAwaitName})
-		// Remove keyboard from template message so it can't be re-clicked
 		h.removeKeyboard(chatID, msgID)
-		h.send(chatID, "Введи название привычки:")
+		h.send(chatID, i18n.T(lang, "habit.enter_name"))
 		return
 	}
 	tmpl, ok := habitTemplates[arg]
@@ -475,16 +485,23 @@ func (h *Handler) cbInterval(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	}
 	state := h.getState(cq.From.ID)
 	if state == nil || state.Step != stepAwaitInterval {
-		// Stale button from old session — just remove keyboard silently
 		h.removeKeyboard(chatID, msgID)
 		return
 	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
 	state.IntervalMinutes = minutes
 	state.Step = stepAwaitStartHour
 	h.setState(cq.From.ID, state)
-	// Update interval message to show selection (prevents re-clicking)
 	h.editMsg(chatID, msgID, fmt.Sprintf("⏱ Интервал: %s ✓", formatInterval(minutes)))
-	h.sendStartHourKeyboard(chatID)
+	if err := h.sendStartHourKeyboard(chatID, lang); err != nil {
+		h.clearState(cq.From.ID)
+		h.send(chatID, i18n.T(lang, "error.generic"))
+	}
 }
 
 func (h *Handler) cbStartHour(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -497,11 +514,20 @@ func (h *Handler) cbStartHour(ctx context.Context, cq *tgbotapi.CallbackQuery, c
 		h.removeKeyboard(chatID, msgID)
 		return
 	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
 	state.StartHour = hour
 	state.Step = stepAwaitEndHour
 	h.setState(cq.From.ID, state)
 	h.editMsg(chatID, msgID, fmt.Sprintf("🕐 Начало: %d:00 ✓", hour))
-	h.sendEndHourKeyboard(chatID, hour+1)
+	if err := h.sendEndHourKeyboard(chatID, lang, hour+1); err != nil {
+		h.clearState(cq.From.ID)
+		h.send(chatID, i18n.T(lang, "error.generic"))
+	}
 }
 
 func (h *Handler) cbEndHour(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -510,14 +536,17 @@ func (h *Handler) cbEndHour(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		return
 	}
 	state := h.getState(cq.From.ID)
-	// Guard: must be in ADD flow (stepAwaitEndHour) with a valid habit name.
-	// stepEditAwaitEndHour is a separate step used by the edit flow.
 	if state == nil || state.Step != stepAwaitEndHour || state.HabitName == "" {
 		h.removeKeyboard(chatID, msgID)
 		return
 	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
 	h.editMsg(chatID, msgID, fmt.Sprintf("🕕 Конец: %d:00 ✓", endHour))
-	// Reuse EditHabitID to temporarily carry endHour through the goal step
 	h.setState(cq.From.ID, &convState{
 		Step:            stepAwaitGoal,
 		HabitName:       state.HabitName,
@@ -525,7 +554,10 @@ func (h *Handler) cbEndHour(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		StartHour:       state.StartHour,
 		EditHabitID:     int64(endHour),
 	})
-	h.sendGoalKeyboard(chatID)
+	if err := h.sendGoalKeyboard(chatID, lang); err != nil {
+		h.clearState(cq.From.ID)
+		h.send(chatID, i18n.T(lang, "error.generic"))
+	}
 }
 
 func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -1496,8 +1528,8 @@ func templateKeyboard() tgbotapi.InlineKeyboardMarkup {
 	)
 }
 
-func (h *Handler) sendIntervalKeyboard(chatID int64) {
-	m := tgbotapi.NewMessage(chatID, "⏱ Как часто напоминать?")
+func (h *Handler) sendIntervalKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_interval"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("30 мин", "interval:30"),
@@ -1509,13 +1541,15 @@ func (h *Handler) sendIntervalKeyboard(chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("Раз в день", "interval:1440"),
 		),
 	)
-	if _, err := h.api.Send(m); err != nil {
+	_, err := h.api.Send(m)
+	if err != nil {
 		h.logger.Error("send interval keyboard", zap.Error(err))
 	}
+	return err
 }
 
-func (h *Handler) sendStartHourKeyboard(chatID int64) {
-	m := tgbotapi.NewMessage(chatID, "🕐 Начало активного времени:")
+func (h *Handler) sendStartHourKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_start"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("5:00", "start_hour:5"),
@@ -1530,12 +1564,14 @@ func (h *Handler) sendStartHourKeyboard(chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("12:00", "start_hour:12"),
 		),
 	)
-	if _, err := h.api.Send(m); err != nil {
+	_, err := h.api.Send(m)
+	if err != nil {
 		h.logger.Error("send start hour keyboard", zap.Error(err))
 	}
+	return err
 }
 
-func (h *Handler) sendEndHourKeyboard(chatID int64, minHour int) {
+func (h *Handler) sendEndHourKeyboard(chatID int64, lang i18n.Lang, minHour int) error {
 	allHours := []int{14, 16, 18, 20, 21, 22, 23}
 	var validHours []int
 	for _, hr := range allHours {
@@ -1544,9 +1580,9 @@ func (h *Handler) sendEndHourKeyboard(chatID int64, minHour int) {
 		}
 	}
 	if len(validHours) == 0 {
-		h.send(chatID, "Нет доступных вариантов для конца. Попробуй выбрать более раннее начало.")
-		h.clearState(chatID) // chatID == telegramID in private chats
-		return
+		h.send(chatID, i18n.T(lang, "error.generic"))
+		h.clearState(chatID)
+		return nil
 	}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	var row []tgbotapi.InlineKeyboardButton
@@ -1560,15 +1596,17 @@ func (h *Handler) sendEndHourKeyboard(chatID int64, minHour int) {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	m := tgbotapi.NewMessage(chatID, "🕕 Конец активного времени:")
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_end"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	if _, err := h.api.Send(m); err != nil {
+	_, err := h.api.Send(m)
+	if err != nil {
 		h.logger.Error("send end hour keyboard", zap.Error(err))
 	}
+	return err
 }
 
-func (h *Handler) sendGoalKeyboard(chatID int64) {
-	m := tgbotapi.NewMessage(chatID, "🎯 Поставь цель (необязательно):")
+func (h *Handler) sendGoalKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_goal"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("21 день", "add_goal:21"),
@@ -1580,9 +1618,11 @@ func (h *Handler) sendGoalKeyboard(chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("Пропустить", "add_goal:0"),
 		),
 	)
-	if _, err := h.api.Send(m); err != nil {
+	_, err := h.api.Send(m)
+	if err != nil {
 		h.logger.Error("send goal keyboard", zap.Error(err))
 	}
+	return err
 }
 
 func (h *Handler) sendEditIntervalKeyboard(chatID, habitID int64) {
