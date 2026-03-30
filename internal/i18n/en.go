@@ -13,6 +13,7 @@ var enMessages = map[string]string{
 	"onboarding.first_habit":       "Add your first habit?",
 	"onboarding.add_yes":           "✅ Add habit",
 	"onboarding.add_later":         "⏭ Later",
+	"onboarding.welcome_screen": "I'll help you build good habits — send reminders, track progress, and celebrate streaks.\n\nPick your first habit:",
 	"habit.choose_template":    "Pick a template or create a custom habit:",
 	"habit.enter_name":         "Enter habit name:",
 	"habit.name_empty":         "Name can't be empty. Enter habit name:",

@@ -13,6 +13,7 @@ var kzMessages = map[string]string{
 	"onboarding.first_habit":       "Бірінші әдетті қосу керек пе?",
 	"onboarding.add_yes":           "✅ Қосу",
 	"onboarding.add_later":         "⏭ Кейінірек",
+	"onboarding.welcome_screen": "Мен сізге пайдалы әдеттер қалыптастыруға көмектесемін.\n\nБірінші әдетті таңда:",
 	"habit.choose_template":    "Үлгі таңдаңыз немесе өз әдетіңізді жасаңыз:",
 	"habit.enter_name":         "Әдеттің атауын енгізіңіз:",
 	"habit.name_empty":         "Атау бос болмауы керек. Атауды енгізіңіз:",

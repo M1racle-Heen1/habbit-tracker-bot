@@ -30,3 +30,14 @@ func TestT_missingKeyReturnsKey(t *testing.T) {
 		t.Fatalf("expected key as fallback, got %q", got)
 	}
 }
+func TestWelcomeScreenKeyExistsAllLangs(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.RU, i18n.EN, i18n.KZ} {
+		got := i18n.T(lang, "onboarding.welcome_screen")
+		if got == "onboarding.welcome_screen" {
+			t.Errorf("lang %s: key onboarding.welcome_screen is missing", lang)
+		}
+		if got == "" {
+			t.Errorf("lang %s: key onboarding.welcome_screen is empty", lang)
+		}
+	}
+}

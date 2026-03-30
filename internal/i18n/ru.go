@@ -13,6 +13,7 @@ var ruMessages = map[string]string{
 	"onboarding.first_habit":       "Добавить первую привычку?",
 	"onboarding.add_yes":           "✅ Добавить",
 	"onboarding.add_later":         "⏭ Позже",
+	"onboarding.welcome_screen": "Я помогу тебе строить полезные привычки — напомню, отслежу прогресс и отмечу стрики.\n\nВыбери первую привычку:",
 	"habit.choose_template":    "Выбери шаблон или создай свою привычку:",
 	"habit.enter_name":         "Введи название привычки:",
 	"habit.name_empty":         "Название не может быть пустым. Введи название:",
