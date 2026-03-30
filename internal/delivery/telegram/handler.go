@@ -354,10 +354,9 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
 	lang := h.lang(user)
 
-	isNew := time.Since(user.CreatedAt) < 60*time.Second
+	isNew := user.Language == ""
 	if isNew {
-		h.setState(msg.From.ID, &convState{Step: stepOnboardTimezone})
-		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "language.choose"))
+		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(i18n.RU, "language.choose"))
 		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
 			tgbotapi.NewInlineKeyboardButtonData("🇬🇧 English", "lang:en"),
@@ -404,6 +403,7 @@ func (h *Handler) cbLanguage(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
 		return
 	}
+	isOnboarding := user.Language == ""
 	if err := h.userUC.SetLanguage(ctx, user.ID, arg); err != nil {
 		h.logger.Error("SetLanguage", zap.Error(err))
 		h.send(chatID, i18n.T(arg, "error.generic"))
@@ -412,9 +412,16 @@ func (h *Handler) cbLanguage(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	labels := map[string]string{"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "kz": "🇰🇿 Қазақша"}
 	h.editMsg(chatID, msgID, "✅ "+labels[arg])
 
-	state := h.getState(cq.From.ID)
-	if state != nil && state.Step == stepOnboardTimezone {
-		h.sendOnboardTimezone(chatID, arg)
+	if isOnboarding {
+		if err := h.userUC.SetTimezone(ctx, user.ID, "Asia/Almaty"); err != nil {
+			h.logger.Error("SetTimezone onboard", zap.Error(err))
+		}
+		h.send(chatID, i18n.T(arg, "onboarding.welcome_screen"))
+		m := tgbotapi.NewMessage(chatID, i18n.T(arg, "habit.choose_template"))
+		m.ReplyMarkup = templateKeyboard()
+		if _, err := h.api.Send(m); err != nil {
+			h.logger.Error("send template keyboard onboard", zap.Error(err))
+		}
 	}
 }
 
