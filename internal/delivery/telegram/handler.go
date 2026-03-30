@@ -243,22 +243,23 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 		}
 
 	case stepEditAwaitName:
+		lang := h.lang(user)
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			h.send(msg.Chat.ID, "Название не может быть пустым. Введи название:")
+			h.send(msg.Chat.ID, i18n.T(lang, "habit.name_empty"))
 			return
 		}
 		habit, err := h.habitUC.GetHabit(ctx, state.EditHabitID)
 		if err != nil {
-			h.send(msg.Chat.ID, "Привычка не найдена.")
+			h.send(msg.Chat.ID, i18n.T(lang, "habit.not_found"))
 			h.clearState(msg.From.ID)
 			return
 		}
 		if _, err := h.habitUC.EditHabit(ctx, user.ID, state.EditHabitID, name, habit.IntervalMinutes, habit.StartHour, habit.EndHour); err != nil {
 			h.logger.Error("EditHabit name", zap.Error(err))
-			h.send(msg.Chat.ID, "Не удалось обновить название.")
+			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
 		} else {
-			h.send(msg.Chat.ID, fmt.Sprintf("✅ Название изменено на «%s»", name))
+			h.send(msg.Chat.ID, i18n.T(lang, "habit.edit_name_done", name))
 		}
 		h.clearState(msg.From.ID)
 	}
@@ -308,7 +309,7 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 	case "confirm_delete":
 		h.cbConfirmDelete(ctx, cq, chatID, msgID, arg)
 	case "cancel_delete":
-		h.editMsg(chatID, msgID, "Удаление отменено.")
+		h.cbCancelDelete(ctx, cq, chatID, msgID)
 	case "snooze":
 		h.cbSnooze(ctx, chatID, msgID, arg)
 	case "pause":
@@ -440,15 +441,15 @@ func (h *Handler) startAddHabit(msg *tgbotapi.Message, user *domain.User) {
 }
 
 func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
+
 	if arg == "custom" {
-		user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
-		if err != nil {
-			h.send(chatID, i18n.T(i18n.RU, "error.generic"))
-			return
-		}
-		lang := h.lang(user)
-		h.clearState(cq.From.ID)
-		h.setState(cq.From.ID, &convState{Step: stepAwaitName})
+		h.setState(cq.From.ID, &convState{Step: stepAwaitName, Lang: lang})
 		h.removeKeyboard(chatID, msgID)
 		h.send(chatID, i18n.T(lang, "habit.enter_name"))
 		return
@@ -457,23 +458,14 @@ func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	if !ok {
 		return
 	}
-	// Clear any wizard state that might be in progress
 	h.clearState(cq.From.ID)
-
-	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
-	if err != nil {
-		h.send(chatID, "Ошибка, попробуй позже.")
-		return
-	}
 	habit, err := h.habitUC.CreateHabit(ctx, user.ID, tmpl.Name, tmpl.Interval, tmpl.Start, tmpl.End, 0)
 	if err != nil {
 		h.logger.Error("CreateHabit template", zap.Error(err))
-		h.send(chatID, "Не удалось создать привычку.")
+		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	// Replace template keyboard with success message — prevents re-clicking
-	h.editMsg(chatID, msgID, fmt.Sprintf(
-		"✅ Привычка «%s» создана!\nНапоминания: %s, %d:00–%d:00",
+	h.editMsg(chatID, msgID, i18n.T(lang, "habit.created",
 		habit.Name, formatInterval(habit.IntervalMinutes), habit.StartHour, habit.EndHour,
 	))
 }
@@ -1542,9 +1534,6 @@ func (h *Handler) sendIntervalKeyboard(chatID int64, lang i18n.Lang) error {
 		),
 	)
 	_, err := h.api.Send(m)
-	if err != nil {
-		h.logger.Error("send interval keyboard", zap.Error(err))
-	}
 	return err
 }
 
@@ -1565,9 +1554,6 @@ func (h *Handler) sendStartHourKeyboard(chatID int64, lang i18n.Lang) error {
 		),
 	)
 	_, err := h.api.Send(m)
-	if err != nil {
-		h.logger.Error("send start hour keyboard", zap.Error(err))
-	}
 	return err
 }
 
@@ -1599,9 +1585,6 @@ func (h *Handler) sendEndHourKeyboard(chatID int64, lang i18n.Lang, minHour int)
 	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_end"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	_, err := h.api.Send(m)
-	if err != nil {
-		h.logger.Error("send end hour keyboard", zap.Error(err))
-	}
 	return err
 }
 
@@ -1619,9 +1602,6 @@ func (h *Handler) sendGoalKeyboard(chatID int64, lang i18n.Lang) error {
 		),
 	)
 	_, err := h.api.Send(m)
-	if err != nil {
-		h.logger.Error("send goal keyboard", zap.Error(err))
-	}
 	return err
 }
 
