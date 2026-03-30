@@ -262,6 +262,12 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 			h.send(msg.Chat.ID, i18n.T(lang, "habit.edit_name_done", name))
 		}
 		h.clearState(msg.From.ID)
+
+	default:
+		if err := h.resendCurrentStep(msg.Chat.ID, h.lang(user), state); err != nil {
+			h.clearState(msg.From.ID)
+			h.send(msg.Chat.ID, i18n.T(h.lang(user), "error.generic"))
+		}
 	}
 }
 
@@ -1690,6 +1696,21 @@ func (h *Handler) sendEditEndHourKeyboard(chatID, habitID int64, minHour int) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convState) error {
+	switch state.Step {
+	case stepAwaitInterval:
+		return h.sendIntervalKeyboard(chatID, lang)
+	case stepAwaitStartHour:
+		return h.sendStartHourKeyboard(chatID, lang)
+	case stepAwaitEndHour:
+		return h.sendEndHourKeyboard(chatID, lang, state.StartHour+1)
+	case stepAwaitGoal:
+		return h.sendGoalKeyboard(chatID, lang)
+	default:
+		return nil
+	}
+}
 
 func (h *Handler) send(chatID int64, text string) {
 	if _, err := h.api.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
