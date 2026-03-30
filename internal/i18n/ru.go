@@ -30,6 +30,7 @@ var ruMessages = map[string]string{
 	"habit.done_goal":          "✅ %s выполнено!\n🔥 Стрик: %d/%d дней",
 	"habit.already_done":       "Привычка уже выполнена сегодня ✓",
 	"habit.not_found":          "Привычка не найдена.",
+	"habit.edit_name_done":     "✅ Название изменено на «%s»",
 	"habit.none":               "Нет привычек.",
 	"habit.none_for_done":      "Нет привычек для отметки.",
 	"habit.none_for_delete":    "Нет привычек для удаления.",

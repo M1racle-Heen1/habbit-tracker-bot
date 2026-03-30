@@ -30,6 +30,7 @@ var kzMessages = map[string]string{
 	"habit.done_goal":          "✅ %s орындалды!\n🔥 Серия: %d/%d күн",
 	"habit.already_done":       "Бүгін орындалды ✓",
 	"habit.not_found":          "Әдет табылмады.",
+	"habit.edit_name_done":     "✅ Атауы «%s» деп өзгертілді",
 	"habit.none":               "Әдеттер жоқ.",
 	"habit.none_for_done":      "Белгілейтін әдеттер жоқ.",
 	"habit.none_for_delete":    "Жоятын әдеттер жоқ.",

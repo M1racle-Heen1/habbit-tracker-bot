@@ -30,6 +30,7 @@ var enMessages = map[string]string{
 	"habit.done_goal":          "✅ %s done!\n🔥 Streak: %d/%d days",
 	"habit.already_done":       "Already done today ✓",
 	"habit.not_found":          "Habit not found.",
+	"habit.edit_name_done":     "✅ Name changed to «%s»",
 	"habit.none":               "No habits.",
 	"habit.none_for_done":      "No habits to mark.",
 	"habit.none_for_delete":    "No habits to delete.",

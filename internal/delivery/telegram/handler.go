@@ -305,7 +305,7 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 	case "timer_set":
 		h.cbTimerSet(ctx, cq, chatID, msgID, arg)
 	case "pre_delete":
-		h.cbPreDelete(ctx, chatID, arg)
+		h.cbPreDelete(ctx, cq, chatID, arg)
 	case "confirm_delete":
 		h.cbConfirmDelete(ctx, cq, chatID, msgID, arg)
 	case "cancel_delete":
@@ -567,22 +567,21 @@ func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 
 	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
 	if err != nil {
-		h.send(chatID, "Ошибка, попробуй позже.")
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
 		return
 	}
+	lang := h.lang(user)
 	habit, err := h.habitUC.CreateHabit(ctx, user.ID, state.HabitName, state.IntervalMinutes, state.StartHour, endHour, goalDays)
 	if err != nil {
 		h.logger.Error("CreateHabit", zap.Error(err))
-		h.send(chatID, "Не удалось создать привычку, попробуй позже.")
+		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-
-	result := fmt.Sprintf("✅ Привычка «%s» создана!\nНапоминания: %s, %d:00–%d:00",
+	result := i18n.T(lang, "habit.created",
 		habit.Name, formatInterval(habit.IntervalMinutes), habit.StartHour, habit.EndHour)
 	if goalDays > 0 {
-		result += fmt.Sprintf("\n🎯 Цель: %d дней", goalDays)
+		result += "\n" + i18n.T(lang, "habit.goal_set", goalDays)
 	}
-	// Replace goal keyboard with result — prevents re-clicking
 	h.editMsg(chatID, msgID, result)
 }
 
@@ -911,25 +910,31 @@ func (h *Handler) handleDeleteHabit(ctx context.Context, msg *tgbotapi.Message, 
 	}
 }
 
-func (h *Handler) cbPreDelete(ctx context.Context, chatID int64, arg string) {
+func (h *Handler) cbPreDelete(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
 	habitID, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
 		return
 	}
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	if err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
+		return
+	}
+	lang := h.lang(user)
 	habit, err := h.habitUC.GetHabit(ctx, habitID)
 	if err != nil {
-		h.send(chatID, "Привычка не найдена.")
+		h.send(chatID, i18n.T(lang, "habit.not_found"))
 		return
 	}
 	warning := ""
 	if habit.Streak > 0 {
-		warning = fmt.Sprintf("\n\n⚠️ Стрик %d дней будет потерян.", habit.Streak)
+		warning = i18n.T(lang, "habit.delete_streak_warn", habit.Streak)
 	}
-	m := tgbotapi.NewMessage(chatID, fmt.Sprintf("🗑 Удалить «%s»?%s", habit.Name, warning))
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.delete_confirm", habit.Name, warning))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Да, удалить", fmt.Sprintf("confirm_delete:%d", habitID)),
-			tgbotapi.NewInlineKeyboardButtonData("Отмена", "cancel_delete:0"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "action.yes_delete"), fmt.Sprintf("confirm_delete:%d", habitID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "action.cancel"), "cancel_delete:0"),
 		),
 	)
 	if _, err := h.api.Send(m); err != nil {
@@ -944,15 +949,25 @@ func (h *Handler) cbConfirmDelete(ctx context.Context, cq *tgbotapi.CallbackQuer
 	}
 	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
 	if err != nil {
-		h.send(chatID, "Ошибка, попробуй позже.")
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
 		return
 	}
+	lang := h.lang(user)
 	if err := h.habitUC.DeleteHabit(ctx, user.ID, habitID); err != nil {
 		h.logger.Error("DeleteHabit", zap.Error(err))
-		h.send(chatID, "Ошибка при удалении.")
+		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, "🗑 Привычка удалена.")
+	h.editMsg(chatID, msgID, i18n.T(lang, "habit.deleted"))
+}
+
+func (h *Handler) cbCancelDelete(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {
+	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
+	lang := i18n.Lang(i18n.RU)
+	if err == nil {
+		lang = h.lang(user)
+	}
+	h.editMsg(chatID, msgID, i18n.T(lang, "action.delete_cancelled"))
 }
 
 // ── Edit habit ────────────────────────────────────────────────────────────────
