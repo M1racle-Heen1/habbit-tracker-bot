@@ -107,6 +107,7 @@ func (h *Handler) getState(telegramID int64) *convState {
 	}
 	var s convState
 	if err := json.Unmarshal([]byte(data), &s); err != nil {
+		h.logger.Error("getState: unmarshal failed", zap.Int64("telegramID", telegramID), zap.Error(err))
 		return nil
 	}
 	return &s
@@ -114,7 +115,9 @@ func (h *Handler) getState(telegramID int64) *convState {
 
 func (h *Handler) setState(telegramID int64, s *convState) {
 	data, _ := json.Marshal(s)
-	_ = h.cache.Set(context.Background(), stateKey(telegramID), string(data), stateTTL)
+	if err := h.cache.Set(context.Background(), stateKey(telegramID), string(data), stateTTL); err != nil {
+		h.logger.Error("setState: redis set failed", zap.Int64("telegramID", telegramID), zap.Error(err))
+	}
 }
 
 func (h *Handler) clearState(telegramID int64) {
@@ -455,7 +458,7 @@ func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		return
 	}
 	h.editMsg(chatID, msgID, i18n.T(lang, "habit.created",
-		habit.Name, formatInterval(habit.IntervalMinutes), habit.StartHour, habit.EndHour,
+		habit.Name, formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour,
 	))
 }
 
@@ -478,7 +481,7 @@ func (h *Handler) cbInterval(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	state.IntervalMinutes = minutes
 	state.Step = stepAwaitStartHour
 	h.setState(cq.From.ID, state)
-	h.editMsg(chatID, msgID, fmt.Sprintf("⏱ Интервал: %s ✓", formatInterval(minutes)))
+	h.editMsg(chatID, msgID, i18n.T(lang, "wizard.interval_set", formatInterval(minutes, lang)))
 	if err := h.sendStartHourKeyboard(chatID, lang); err != nil {
 		h.clearState(cq.From.ID)
 		h.send(chatID, i18n.T(lang, "error.generic"))
@@ -504,7 +507,7 @@ func (h *Handler) cbStartHour(ctx context.Context, cq *tgbotapi.CallbackQuery, c
 	state.StartHour = hour
 	state.Step = stepAwaitEndHour
 	h.setState(cq.From.ID, state)
-	h.editMsg(chatID, msgID, fmt.Sprintf("🕐 Начало: %d:00 ✓", hour))
+	h.editMsg(chatID, msgID, i18n.T(lang, "wizard.start_set", hour))
 	if err := h.sendEndHourKeyboard(chatID, lang, hour+1); err != nil {
 		h.clearState(cq.From.ID)
 		h.send(chatID, i18n.T(lang, "error.generic"))
@@ -527,7 +530,7 @@ func (h *Handler) cbEndHour(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		return
 	}
 	lang := h.lang(user)
-	h.editMsg(chatID, msgID, fmt.Sprintf("🕕 Конец: %d:00 ✓", endHour))
+	h.editMsg(chatID, msgID, i18n.T(lang, "wizard.end_set", endHour))
 	h.setState(cq.From.ID, &convState{
 		Step:            stepAwaitGoal,
 		HabitName:       state.HabitName,
@@ -567,7 +570,7 @@ func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		return
 	}
 	result := i18n.T(lang, "habit.created",
-		habit.Name, formatInterval(habit.IntervalMinutes), habit.StartHour, habit.EndHour)
+		habit.Name, formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour)
 	if goalDays > 0 {
 		result += "\n" + i18n.T(lang, "habit.goal_set", goalDays)
 	}
@@ -859,7 +862,7 @@ func (h *Handler) handleListHabits(ctx context.Context, msg *tgbotapi.Message, u
 
 		sb.WriteString(fmt.Sprintf("%s %s%s%s\n   %s, %d:00–%d:00\n\n",
 			mark, habit.Name, streakStr, goalStr,
-			formatInterval(habit.IntervalMinutes), habit.StartHour, habit.EndHour,
+			formatInterval(habit.IntervalMinutes, h.lang(user)), habit.StartHour, habit.EndHour,
 		))
 
 		if !done && !habit.IsPaused {
@@ -1034,20 +1037,21 @@ func (h *Handler) cbEditInterval(ctx context.Context, cq *tgbotapi.CallbackQuery
 	}
 	user, err := h.userUC.GetOrCreateUser(ctx, cq.From.ID, cq.From.UserName, cq.From.FirstName)
 	if err != nil {
-		h.send(chatID, "Ошибка, попробуй позже.")
+		h.send(chatID, i18n.T(i18n.RU, "error.generic"))
 		return
 	}
+	lang := h.lang(user)
 	habit, err := h.habitUC.GetHabit(ctx, habitID)
 	if err != nil {
-		h.send(chatID, "Привычка не найдена.")
+		h.send(chatID, i18n.T(lang, "habit.not_found"))
 		return
 	}
 	if _, err := h.habitUC.EditHabit(ctx, user.ID, habitID, habit.Name, minutes, habit.StartHour, habit.EndHour); err != nil {
 		h.logger.Error("EditHabit interval", zap.Error(err))
-		h.send(chatID, "Ошибка обновления.")
+		h.send(chatID, i18n.T(lang, "error.update"))
 		return
 	}
-	h.editMsg(chatID, msgID, fmt.Sprintf("✅ Интервал изменён: %s", formatInterval(minutes)))
+	h.editMsg(chatID, msgID, i18n.T(lang, "habit.interval_updated", formatInterval(minutes, lang)))
 }
 
 func (h *Handler) cbEditStart(cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -1481,13 +1485,13 @@ func (h *Handler) sendIntervalKeyboard(chatID int64, lang i18n.Lang) error {
 	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_interval"))
 	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("30 мин", "interval:30"),
-			tgbotapi.NewInlineKeyboardButtonData("1 час", "interval:60"),
-			tgbotapi.NewInlineKeyboardButtonData("2 часа", "interval:120"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(30, lang), "interval:30"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(60, lang), "interval:60"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(120, lang), "interval:120"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("3 часа", "interval:180"),
-			tgbotapi.NewInlineKeyboardButtonData("Раз в день", "interval:1440"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(180, lang), "interval:180"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(1440, lang), "interval:1440"),
 		),
 	)
 	_, err := h.api.Send(m)
@@ -1635,6 +1639,11 @@ func (h *Handler) sendEditEndHourKeyboard(chatID, habitID int64, minHour int) {
 
 func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convState) error {
 	switch state.Step {
+	case stepIdle:
+		m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
+		m.ReplyMarkup = templateKeyboard()
+		_, err := h.api.Send(m)
+		return err
 	case stepAwaitInterval:
 		return h.sendIntervalKeyboard(chatID, lang)
 	case stepAwaitStartHour:
@@ -1664,18 +1673,16 @@ func doneMessage(name string, streak, goalDays int, lang i18n.Lang) string {
 	return i18n.T(lang, "habit.done_simple")
 }
 
-func formatInterval(minutes int) string {
+func formatInterval(minutes int, lang string) string {
 	switch {
 	case minutes >= 1440:
-		return "раз в день"
+		return i18n.T(lang, "interval.daily")
+	case minutes == 60:
+		return i18n.T(lang, "interval.hourly")
 	case minutes >= 60:
-		hours := minutes / 60
-		if hours == 1 {
-			return "каждый час"
-		}
-		return fmt.Sprintf("каждые %d ч", hours)
+		return i18n.T(lang, "interval.every_n_hours", minutes/60)
 	default:
-		return fmt.Sprintf("каждые %d мин", minutes)
+		return i18n.T(lang, "interval.every_n_min", minutes)
 	}
 }
 
