@@ -689,6 +689,47 @@ func (h *Handler) cbGoalMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	}
 }
 
+func (h *Handler) cbHabitMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
+	habitID, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return
+	}
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	habit, err := h.habitUC.GetHabit(ctx, habitID)
+	if err != nil {
+		h.send(chatID, i18n.T(lang, "habit.not_found"))
+		return
+	}
+
+	pauseLabel := i18n.T(lang, "habit.pause_btn")
+	pauseAction := fmt.Sprintf("pause:%d", habitID)
+	if habit.IsPaused {
+		pauseLabel = i18n.T(lang, "habit.resume_btn")
+		pauseAction = fmt.Sprintf("resume:%d", habitID)
+	}
+
+	m := tgbotapi.NewMessage(chatID, habit.Name)
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "habit.done_btn"), fmt.Sprintf("done:%d", habitID)),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "edit.name_btn"), fmt.Sprintf("edit:%d", habitID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(pauseLabel, pauseAction),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "history.btn"), fmt.Sprintf("history:%d", habitID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "habit.delete_btn"), fmt.Sprintf("pre_delete:%d", habitID)),
+		),
+	)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send habit menu", zap.Error(err))
+	}
+}
+
 func (h *Handler) cbTimezoneOnboard(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, tz string) {
 	if _, err := time.LoadLocation(tz); err != nil {
 		h.send(chatID, i18n.T(i18n.RU, "timezone.invalid"))

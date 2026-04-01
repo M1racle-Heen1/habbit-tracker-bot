@@ -143,7 +143,7 @@ func (h *Handler) handleListHabits(ctx context.Context, msg *tgbotapi.Message, u
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "habit.list_header"))
 
-	var undoneRows [][]tgbotapi.InlineKeyboardButton
+	var habitRows [][]tgbotapi.InlineKeyboardButton
 	for _, habit := range habits {
 		done := usecase.IsDoneToday(habit, now)
 		mark := "○"
@@ -169,16 +169,14 @@ func (h *Handler) handleListHabits(ctx context.Context, msg *tgbotapi.Message, u
 			formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour,
 		))
 
-		if !done && !habit.IsPaused {
-			undoneRows = append(undoneRows, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ "+habit.Name, fmt.Sprintf("done:%d", habit.ID)),
-			))
-		}
+		habitRows = append(habitRows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⚙️ "+habit.Name, fmt.Sprintf("habit_menu:%d", habit.ID)),
+		))
 	}
 
 	m := tgbotapi.NewMessage(msg.Chat.ID, sb.String())
-	if len(undoneRows) > 0 {
-		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(undoneRows...)
+	if len(habitRows) > 0 {
+		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(habitRows...)
 	}
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send list", zap.Error(err))
