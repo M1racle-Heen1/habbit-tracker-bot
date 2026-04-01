@@ -234,6 +234,30 @@ func (h *Handler) handleCommand(ctx context.Context, msg *tgbotapi.Message, user
 // ── Text input handler ────────────────────────────────────────────────────────
 
 func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	switch msg.Text {
+	case i18n.T(lang, "nav.today"):
+		h.clearState(msg.From.ID)
+		h.handleToday(ctx, msg, user)
+		return
+	case i18n.T(lang, "nav.my_habits"):
+		h.clearState(msg.From.ID)
+		h.handleListHabits(ctx, msg, user)
+		return
+	case i18n.T(lang, "nav.add_habit"):
+		h.clearState(msg.From.ID)
+		h.startAddHabit(msg, user)
+		return
+	case i18n.T(lang, "nav.stats"):
+		h.clearState(msg.From.ID)
+		h.handleStats(ctx, msg, user)
+		return
+	case i18n.T(lang, "nav.settings"):
+		h.clearState(msg.From.ID)
+		h.handleSettings(ctx, msg, user)
+		return
+	}
+
 	state := h.getState(msg.From.ID)
 	if state == nil {
 		return
@@ -243,19 +267,20 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 	case stepAwaitName:
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
-			h.send(msg.Chat.ID, i18n.T(h.lang(user), "habit.name_empty"))
+			h.send(msg.Chat.ID, i18n.T(lang, "habit.name_empty"))
 			return
 		}
-		state.HabitName = name
-		state.Step = stepAwaitInterval
-		h.setState(msg.From.ID, state)
-		if err := h.sendIntervalKeyboard(msg.Chat.ID, h.lang(user)); err != nil {
-			h.clearState(msg.From.ID)
-			h.send(msg.Chat.ID, i18n.T(h.lang(user), "error.generic"))
+		h.clearState(msg.From.ID)
+		habit, err := h.habitUC.CreateHabit(ctx, user.ID, name, 120, 8, 22, 0)
+		if err != nil {
+			h.logger.Error("CreateHabit custom", zap.Error(err))
+			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+			return
 		}
+		h.send(msg.Chat.ID, i18n.T(lang, "habit.created_with_defaults", habit.Name))
+		h.sendMainNav(msg.Chat.ID, lang)
 
 	case stepEditAwaitName:
-		lang := h.lang(user)
 		name := strings.TrimSpace(msg.Text)
 		if name == "" {
 			h.send(msg.Chat.ID, i18n.T(lang, "habit.name_empty"))
@@ -276,9 +301,9 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 		h.clearState(msg.From.ID)
 
 	default:
-		if err := h.resendCurrentStep(msg.Chat.ID, h.lang(user), state); err != nil {
+		if err := h.resendCurrentStep(msg.Chat.ID, lang, state); err != nil {
 			h.clearState(msg.From.ID)
-			h.send(msg.Chat.ID, i18n.T(h.lang(user), "error.generic"))
+			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
 		}
 	}
 }

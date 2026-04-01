@@ -61,6 +61,20 @@ func (h *Handler) handleTimezone(msg *tgbotapi.Message, user *domain.User) {
 	h.sendTimezoneKeyboard(msg.Chat.ID, h.lang(user), "tz:")
 }
 
+func (h *Handler) handleSettings(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "settings.header"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "settings.lang_btn"), "settings:language"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "settings.tz_btn"), "settings:timezone"),
+		),
+	)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send settings", zap.Error(err))
+	}
+}
+
 func (h *Handler) startAddHabit(msg *tgbotapi.Message, user *domain.User) {
 	lang := h.lang(user)
 	h.setState(msg.From.ID, &convState{Step: stepIdle, Lang: lang})
