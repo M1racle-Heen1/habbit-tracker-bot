@@ -58,22 +58,7 @@ func (h *Handler) handleLanguage(msg *tgbotapi.Message) {
 }
 
 func (h *Handler) handleTimezone(msg *tgbotapi.Message, user *domain.User) {
-	lang := h.lang(user)
-	m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "timezone.choose"))
-	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := 0; i < len(commonTimezones); i += 2 {
-		row := []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i].Label, "tz:"+commonTimezones[i].Value),
-		}
-		if i+1 < len(commonTimezones) {
-			row = append(row, tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i+1].Label, "tz:"+commonTimezones[i+1].Value))
-		}
-		rows = append(rows, row)
-	}
-	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	if _, err := h.api.Send(m); err != nil {
-		h.logger.Error("send timezone keyboard", zap.Error(err))
-	}
+	h.sendTimezoneKeyboard(msg.Chat.ID, h.lang(user), "tz:")
 }
 
 func (h *Handler) startAddHabit(msg *tgbotapi.Message, user *domain.User) {

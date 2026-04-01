@@ -11,6 +11,50 @@ import (
 	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
 )
 
+func mainNavKeyboard(lang i18n.Lang) tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(i18n.T(lang, "nav.today")),
+			tgbotapi.NewKeyboardButton(i18n.T(lang, "nav.my_habits")),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(i18n.T(lang, "nav.add_habit")),
+			tgbotapi.NewKeyboardButton(i18n.T(lang, "nav.stats")),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(i18n.T(lang, "nav.settings")),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+func (h *Handler) sendMainNav(chatID int64, lang i18n.Lang) {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "nav.menu_hint"))
+	m.ReplyMarkup = mainNavKeyboard(lang)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send main nav", zap.Error(err))
+	}
+}
+
+func (h *Handler) sendTimezoneKeyboard(chatID int64, lang i18n.Lang, callbackPrefix string) {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < len(commonTimezones); i += 2 {
+		row := []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i].Label, callbackPrefix+commonTimezones[i].Value),
+		}
+		if i+1 < len(commonTimezones) {
+			row = append(row, tgbotapi.NewInlineKeyboardButtonData(commonTimezones[i+1].Label, callbackPrefix+commonTimezones[i+1].Value))
+		}
+		rows = append(rows, row)
+	}
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "timezone.choose"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send timezone keyboard", zap.Error(err))
+	}
+}
+
 func templateKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
