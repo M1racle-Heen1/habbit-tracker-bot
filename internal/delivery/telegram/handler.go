@@ -226,6 +226,8 @@ func (h *Handler) handleCommand(ctx context.Context, msg *tgbotapi.Message, user
 		h.handleToday(ctx, msg, user)
 	case "achievements":
 		h.handleAchievements(ctx, msg, user)
+	case "settings":
+		h.handleSettings(ctx, msg, user)
 	case "health":
 		h.send(msg.Chat.ID, "OK")
 	}
@@ -379,5 +381,7 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbSetGoal(ctx, cq, chatID, msgID, arg)
 	case "goal_menu":
 		h.cbGoalMenu(ctx, cq, chatID, arg)
+	case "settings":
+		h.cbSettings(ctx, cq, chatID, arg)
 	}
 }

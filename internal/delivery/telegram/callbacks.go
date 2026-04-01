@@ -696,6 +696,27 @@ func (h *Handler) cbGoalMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	}
 }
 
+func (h *Handler) cbSettings(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	switch arg {
+	case "language":
+		m := tgbotapi.NewMessage(chatID, "Выбери язык / Choose language / Тіл таңда:")
+		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
+			tgbotapi.NewInlineKeyboardButtonData("🇬🇧 English", "lang:en"),
+			tgbotapi.NewInlineKeyboardButtonData("🇰🇿 Қазақша", "lang:kz"),
+		))
+		if _, err := h.api.Send(m); err != nil {
+			h.logger.Error("send language from settings", zap.Error(err))
+		}
+	case "timezone":
+		h.sendTimezoneKeyboard(chatID, lang, "tz:")
+	}
+}
+
 func (h *Handler) cbSetGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
 	subparts := strings.SplitN(arg, ":", 2)
 	if len(subparts) != 2 {
