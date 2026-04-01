@@ -59,7 +59,7 @@ func (h *Handler) cbTimezone(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		h.send(chatID, i18n.T(h.lang(user), "error.update"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(h.lang(user), "timezone.set", tz))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(h.lang(user), "timezone.set", tz))
 }
 
 func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -85,7 +85,7 @@ func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "habit.created",
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.created",
 		habit.Name, formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour,
 	))
 	h.sendMainNav(chatID, lang)
@@ -195,7 +195,7 @@ func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 	if goalDays > 0 {
 		result += "\n" + i18n.T(lang, "habit.goal_set", goalDays)
 	}
-	h.editMsg(chatID, msgID, result)
+	h.editMsgAndClearMarkup(chatID, msgID, result)
 }
 
 func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -240,6 +240,9 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "habit.undo_btn"), fmt.Sprintf("undo:%d", habitID)),
 		))
 		edit.ReplyMarkup = &kb
+	} else {
+		empty := tgbotapi.NewInlineKeyboardMarkup()
+		edit.ReplyMarkup = &empty
 	}
 	if _, err := h.api.Send(edit); err != nil {
 		h.logger.Error("edit done msg", zap.Error(err))
@@ -258,7 +261,7 @@ func (h *Handler) cbUndo(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 
 	val, err := h.cache.Get(ctx, undoKey(habitID))
 	if err != nil {
-		h.editMsg(chatID, msgID, i18n.T(lang, "habit.undo_expired"))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.undo_expired"))
 		return
 	}
 	_ = h.cache.Delete(ctx, undoKey(habitID))
@@ -281,7 +284,7 @@ func (h *Handler) cbUndo(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 		h.editMsg(chatID, msgID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "habit.undo_done"))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.undo_done"))
 }
 
 func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {
@@ -301,7 +304,7 @@ func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		}
 		_ = h.habitUC.MarkDone(ctx, user.ID, habit.ID)
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "today.all_done"))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "today.all_done"))
 }
 
 func (h *Handler) cbTimerStart(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -420,7 +423,7 @@ func (h *Handler) cbConfirmDelete(ctx context.Context, cq *tgbotapi.CallbackQuer
 		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "habit.deleted"))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.deleted"))
 }
 
 func (h *Handler) cbCancelDelete(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {
@@ -429,7 +432,7 @@ func (h *Handler) cbCancelDelete(ctx context.Context, cq *tgbotapi.CallbackQuery
 	if err == nil {
 		lang = h.lang(user)
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "action.delete_cancelled"))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "action.delete_cancelled"))
 }
 
 func (h *Handler) cbEditMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
@@ -506,7 +509,7 @@ func (h *Handler) cbEditInterval(ctx context.Context, cq *tgbotapi.CallbackQuery
 		h.send(chatID, i18n.T(lang, "error.update"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "habit.interval_updated", formatInterval(minutes, lang)))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.interval_updated", formatInterval(minutes, lang)))
 }
 
 func (h *Handler) cbEditStart(cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -573,7 +576,7 @@ func (h *Handler) cbEditEnd(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		h.send(chatID, i18n.T(lang, "error.update"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "habit.hours_updated", startHour, endHour))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.hours_updated", startHour, endHour))
 }
 
 func (h *Handler) cbPauseResume(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string, pause bool) {
@@ -596,14 +599,14 @@ func (h *Handler) cbPauseResume(ctx context.Context, cq *tgbotapi.CallbackQuery,
 			h.send(chatID, i18n.T(lang, "error.generic"))
 			return
 		}
-		h.editMsg(chatID, msgID, i18n.T(lang, "habit.paused", habit.Name))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.paused", habit.Name))
 	} else {
 		if err := h.habitUC.ResumeHabit(ctx, user.ID, habitID); err != nil {
 			h.logger.Error("ResumeHabit", zap.Error(err))
 			h.send(chatID, i18n.T(lang, "error.generic"))
 			return
 		}
-		h.editMsg(chatID, msgID, i18n.T(lang, "habit.resumed", habit.Name))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.resumed", habit.Name))
 	}
 }
 
@@ -629,7 +632,7 @@ func (h *Handler) cbSnooze(ctx context.Context, cq *tgbotapi.CallbackQuery, chat
 		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "snooze.remind_in", minutes))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "snooze.remind_in", minutes))
 }
 
 func (h *Handler) cbHistory(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
@@ -744,7 +747,7 @@ func (h *Handler) cbTimezoneOnboard(ctx context.Context, cq *tgbotapi.CallbackQu
 		h.send(chatID, i18n.T(lang, "error.generic"))
 		return
 	}
-	h.editMsg(chatID, msgID, i18n.T(lang, "timezone.set", tz))
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "timezone.set", tz))
 	h.send(chatID, i18n.T(lang, "onboarding.welcome_screen"))
 	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
 	m.ReplyMarkup = onboardTemplateKeyboard(lang)
@@ -806,8 +809,8 @@ func (h *Handler) cbSetGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		return
 	}
 	if days == 0 {
-		h.editMsg(chatID, msgID, i18n.T(lang, "goal.removed"))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "goal.removed"))
 	} else {
-		h.editMsg(chatID, msgID, i18n.T(lang, "goal.set", days))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "goal.set", days))
 	}
 }
