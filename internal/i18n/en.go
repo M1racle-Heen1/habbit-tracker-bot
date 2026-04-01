@@ -9,7 +9,7 @@ var enMessages = map[string]string{
 	"action.delete_cancelled": "Deletion cancelled.",
 	"language.choose":         "Выбери язык / Choose language / Тіл таңда:",
 	"onboarding.welcome_new":       "Hi, %s! 👋\n\nI'll help you build good habits.\n\nPick a template or create your own:",
-	"onboarding.welcome_returning": "Hi, %s! 👋\n\nCommands:\n/add_habit — add a habit\n/list_habits — habits with progress\n/done — mark as done\n/today — today's habits\n/edit_habit — edit a habit\n/pause_habit — pause\n/resume_habit — resume\n/stats — statistics\n/history — completion history\n/timezone — set timezone\n/achievements — achievements\n/language — change language\n/delete_habit — delete a habit\n/cancel — cancel current action",
+	"onboarding.welcome_returning": "Welcome back, %s! 👋",
 	"onboarding.first_habit":       "Add your first habit?",
 	"onboarding.add_yes":           "✅ Add habit",
 	"onboarding.add_later":         "⏭ Later",

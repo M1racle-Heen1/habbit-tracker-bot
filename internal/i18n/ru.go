@@ -9,7 +9,7 @@ var ruMessages = map[string]string{
 	"action.delete_cancelled": "Удаление отменено.",
 	"language.choose":         "Выбери язык / Choose language / Тіл таңда:",
 	"onboarding.welcome_new":       "Привет, %s! 👋\n\nЯ помогу тебе формировать полезные привычки.\n\nВыбери шаблон или создай свою:",
-	"onboarding.welcome_returning": "Привет, %s! 👋\n\nКоманды:\n/add_habit — добавить привычку\n/list_habits — список с прогрессом\n/done — отметить выполнение\n/today — привычки на сегодня\n/edit_habit — редактировать\n/pause_habit — пауза\n/resume_habit — снять с паузы\n/stats — статистика\n/history — история\n/timezone — часовой пояс\n/achievements — достижения\n/language — язык\n/delete_habit — удалить\n/cancel — отменить",
+	"onboarding.welcome_returning": "С возвращением, %s! 👋",
 	"onboarding.first_habit":       "Добавить первую привычку?",
 	"onboarding.add_yes":           "✅ Добавить",
 	"onboarding.add_later":         "⏭ Позже",

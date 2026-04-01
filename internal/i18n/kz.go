@@ -9,7 +9,7 @@ var kzMessages = map[string]string{
 	"action.delete_cancelled": "Жою болдырылмады.",
 	"language.choose":         "Выбери язык / Choose language / Тіл таңда:",
 	"onboarding.welcome_new":       "Сәлем, %s! 👋\n\nМен сізге пайдалы әдеттер қалыптастыруға көмектесемін.\n\nҮлгі таңдаңыз немесе өзіңіз жасаңыз:",
-	"onboarding.welcome_returning": "Сәлем, %s! 👋\n\nКомандалар:\n/add_habit — әдет қосу\n/list_habits — тізім\n/done — орындалды деп белгілеу\n/today — бүгінгі әдеттер\n/edit_habit — өңдеу\n/pause_habit — кідірту\n/resume_habit — жалғастыру\n/stats — статистика\n/history — тарих\n/timezone — уақыт белдеуі\n/achievements — жетістіктер\n/language — тіл\n/delete_habit — жою\n/cancel — болдырмау",
+	"onboarding.welcome_returning": "Қайтып келдіңіз, %s! 👋",
 	"onboarding.first_habit":       "Бірінші әдетті қосу керек пе?",
 	"onboarding.add_yes":           "✅ Қосу",
 	"onboarding.add_later":         "⏭ Кейінірек",

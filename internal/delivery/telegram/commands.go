@@ -42,7 +42,11 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *
 		return
 	}
 
-	h.send(msg.Chat.ID, i18n.T(lang, "onboarding.welcome_returning", user.FirstName))
+	m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "onboarding.welcome_returning", user.FirstName))
+	m.ReplyMarkup = mainNavKeyboard(lang)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send start returning", zap.Error(err))
+	}
 }
 
 func (h *Handler) handleLanguage(msg *tgbotapi.Message) {
