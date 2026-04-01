@@ -138,6 +138,15 @@ func (h *Handler) editMsg(chatID int64, messageID int, text string) {
 	}
 }
 
+func (h *Handler) editMsgAndClearMarkup(chatID int64, messageID int, text string) {
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	empty := tgbotapi.NewInlineKeyboardMarkup()
+	edit.ReplyMarkup = &empty
+	if _, err := h.api.Request(edit); err != nil {
+		h.logger.Warn("edit message and clear markup", zap.Error(err))
+	}
+}
+
 func (h *Handler) send(chatID int64, text string) {
 	if _, err := h.api.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
 		h.logger.Error("send message", zap.Int64("chat_id", chatID), zap.Error(err))
