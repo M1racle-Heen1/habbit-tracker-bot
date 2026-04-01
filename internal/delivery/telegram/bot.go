@@ -17,20 +17,12 @@ func NewBot(api *tgbotapi.BotAPI, handler *Handler, logger *zap.Logger) *Bot {
 
 func (b *Bot) Start() {
 	commands := []tgbotapi.BotCommand{
-		{Command: "list_habits", Description: "Habits with progress / Список привычек"},
-		{Command: "today", Description: "Today's habits / Сегодня"},
-		{Command: "done", Description: "Mark as done / Отметить выполнение"},
-		{Command: "add_habit", Description: "Add habit / Добавить привычку"},
-		{Command: "achievements", Description: "Achievements / Достижения"},
+		{Command: "start", Description: "Start / Начать"},
+		{Command: "today", Description: "Today's habits / Привычки на сегодня"},
 		{Command: "stats", Description: "Statistics / Статистика"},
-		{Command: "history", Description: "History / История"},
-		{Command: "edit_habit", Description: "Edit habit / Редактировать"},
-		{Command: "pause_habit", Description: "Pause / Пауза"},
-		{Command: "resume_habit", Description: "Resume / Возобновить"},
-		{Command: "language", Description: "Language / Язык / Тіл"},
-		{Command: "timezone", Description: "Timezone / Часовой пояс"},
-		{Command: "delete_habit", Description: "Delete habit / Удалить"},
-		{Command: "cancel", Description: "Cancel / Отмена"},
+		{Command: "achievements", Description: "Achievements / Достижения"},
+		{Command: "settings", Description: "Settings / Настройки"},
+		{Command: "cancel", Description: "Cancel current action / Отменить"},
 	}
 	if _, err := b.api.Request(tgbotapi.NewSetMyCommands(commands...)); err != nil {
 		b.logger.Warn("failed to set commands menu", zap.Error(err))
