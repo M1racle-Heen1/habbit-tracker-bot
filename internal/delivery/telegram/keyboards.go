@@ -55,6 +55,14 @@ func (h *Handler) sendTimezoneKeyboard(chatID int64, lang i18n.Lang, callbackPre
 	}
 }
 
+func onboardTemplateKeyboard(lang i18n.Lang) tgbotapi.InlineKeyboardMarkup {
+	base := templateKeyboard()
+	base.InlineKeyboard = append(base.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "onboarding.skip_btn"), "onboard_skip:1"),
+	))
+	return base
+}
+
 func templateKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(

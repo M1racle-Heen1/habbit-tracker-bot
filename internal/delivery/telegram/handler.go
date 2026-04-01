@@ -383,5 +383,9 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbGoalMenu(ctx, cq, chatID, arg)
 	case "settings":
 		h.cbSettings(ctx, cq, chatID, arg)
+	case "tz_ob":
+		h.cbTimezoneOnboard(ctx, cq, chatID, msgID, arg)
+	case "onboard_skip":
+		h.cbOnboardSkip(ctx, cq, chatID, msgID)
 	}
 }

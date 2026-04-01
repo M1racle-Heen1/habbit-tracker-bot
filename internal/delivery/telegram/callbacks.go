@@ -41,15 +41,7 @@ func (h *Handler) cbLanguage(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	h.editMsg(chatID, msgID, "✅ "+labels[arg])
 
 	if isOnboarding {
-		if err := h.userUC.SetTimezone(ctx, user.ID, "Asia/Almaty"); err != nil {
-			h.logger.Error("SetTimezone onboard", zap.Error(err))
-		}
-		h.send(chatID, i18n.T(arg, "onboarding.welcome_screen"))
-		m := tgbotapi.NewMessage(chatID, i18n.T(arg, "habit.choose_template"))
-		m.ReplyMarkup = templateKeyboard()
-		if _, err := h.api.Send(m); err != nil {
-			h.logger.Error("send template keyboard onboard", zap.Error(err))
-		}
+		h.sendTimezoneKeyboard(chatID, i18n.Lang(arg), "tz_ob:")
 	}
 }
 
@@ -694,6 +686,38 @@ func (h *Handler) cbGoalMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send goal menu", zap.Error(err))
 	}
+}
+
+func (h *Handler) cbTimezoneOnboard(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, tz string) {
+	if _, err := time.LoadLocation(tz); err != nil {
+		h.send(chatID, i18n.T(i18n.RU, "timezone.invalid"))
+		return
+	}
+	user, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	if err := h.userUC.SetTimezone(ctx, user.ID, tz); err != nil {
+		h.logger.Error("SetTimezone onboard", zap.Error(err))
+		h.send(chatID, i18n.T(lang, "error.generic"))
+		return
+	}
+	h.editMsg(chatID, msgID, i18n.T(lang, "timezone.set", tz))
+	h.send(chatID, i18n.T(lang, "onboarding.welcome_screen"))
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
+	m.ReplyMarkup = onboardTemplateKeyboard(lang)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send template keyboard onboard", zap.Error(err))
+	}
+}
+
+func (h *Handler) cbOnboardSkip(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int) {
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	h.removeKeyboard(chatID, msgID)
+	h.sendMainNav(chatID, lang)
 }
 
 func (h *Handler) cbSettings(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, arg string) {
