@@ -30,6 +30,29 @@ func TestT_missingKeyReturnsKey(t *testing.T) {
 		t.Fatalf("expected key as fallback, got %q", got)
 	}
 }
+func TestNewNavKeysExistAllLangs(t *testing.T) {
+	keys := []string{
+		"nav.today", "nav.my_habits", "nav.add_habit", "nav.stats", "nav.settings",
+		"nav.menu_hint",
+		"habit.created_with_defaults",
+		"settings.header", "settings.lang_btn", "settings.tz_btn",
+		"onboarding.skip_btn",
+		"habit.pause_btn", "habit.resume_btn", "habit.done_btn", "habit.delete_btn",
+		"history.btn",
+	}
+	for _, key := range keys {
+		for _, lang := range []i18n.Lang{i18n.RU, i18n.EN, i18n.KZ} {
+			got := i18n.T(lang, key)
+			if got == key {
+				t.Errorf("lang %s: key %q is missing", lang, key)
+			}
+			if got == "" {
+				t.Errorf("lang %s: key %q is empty", lang, key)
+			}
+		}
+	}
+}
+
 func TestWelcomeScreenKeyExistsAllLangs(t *testing.T) {
 	for _, lang := range []i18n.Lang{i18n.RU, i18n.EN, i18n.KZ} {
 		got := i18n.T(lang, "onboarding.welcome_screen")
