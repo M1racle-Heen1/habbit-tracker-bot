@@ -25,4 +25,3 @@ issues:
     - text: "Error return value of .*(logger.Sync|zap.*Sync).*is not checked"
       linters: [ errcheck ]
 
-version: 2

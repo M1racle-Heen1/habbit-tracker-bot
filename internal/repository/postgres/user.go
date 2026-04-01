@@ -55,26 +55,22 @@ func (r *UserRepository) UpdateLanguage(ctx context.Context, userID int64, langu
 }
 
 func (r *UserRepository) AddXP(ctx context.Context, userID int64, xp int) (int, int, error) {
-	thresholds := []int{0, 100, 250, 500, 1000}
-	levelFor := func(totalXP int) int {
-		lv := 1
-		for i, t := range thresholds {
-			if totalXP >= t {
-				lv = i + 1
-			}
-		}
-		if totalXP >= 1000 {
-			lv = 5 + (totalXP-1000)/500
-		}
-		return lv
-	}
-	var newXP int
-	err := r.pool.QueryRow(ctx, `UPDATE users SET xp = xp + $1 WHERE id = $2 RETURNING xp`, xp, userID).Scan(&newXP)
-	if err != nil {
-		return 0, 0, err
-	}
-	newLevel := levelFor(newXP)
-	_, err = r.pool.Exec(ctx, `UPDATE users SET level = $1 WHERE id = $2`, newLevel, userID)
+	var newXP, newLevel int
+	err := r.pool.QueryRow(ctx, `
+		UPDATE users
+		SET xp    = xp + $1,
+		    level = CASE
+		              WHEN xp + $1 >= 1000 THEN 5 + (xp + $1 - 1000) / 500
+		              WHEN xp + $1 >= 500  THEN 5
+		              WHEN xp + $1 >= 250  THEN 4
+		              WHEN xp + $1 >= 100  THEN 3
+		              WHEN xp + $1 >= 0    THEN 2
+		              ELSE 1
+		            END
+		WHERE id = $2
+		RETURNING xp, level`,
+		xp, userID,
+	).Scan(&newXP, &newLevel)
 	return newXP, newLevel, err
 }
 

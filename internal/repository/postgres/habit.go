@@ -23,8 +23,12 @@ func NewHabitRepository(pool *pgxpool.Pool) *HabitRepository {
 const habitCols = `id, user_id, name, description, interval_minutes, start_hour, end_hour,
 	last_done_at, last_notified_at, streak, best_streak, is_paused, goal_days, snooze_until, created_at`
 
-func scanHabitRow(row pgx.Row, h *domain.Habit) error {
-	return row.Scan(
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanHabit(s scanner, h *domain.Habit) error {
+	return s.Scan(
 		&h.ID, &h.UserID, &h.Name, &h.Description,
 		&h.IntervalMinutes, &h.StartHour, &h.EndHour,
 		&h.LastDoneAt, &h.LastNotifiedAt,
@@ -33,15 +37,8 @@ func scanHabitRow(row pgx.Row, h *domain.Habit) error {
 	)
 }
 
-func scanHabitRows(rows pgx.Rows, h *domain.Habit) error {
-	return rows.Scan(
-		&h.ID, &h.UserID, &h.Name, &h.Description,
-		&h.IntervalMinutes, &h.StartHour, &h.EndHour,
-		&h.LastDoneAt, &h.LastNotifiedAt,
-		&h.Streak, &h.BestStreak, &h.IsPaused, &h.GoalDays, &h.SnoozeUntil,
-		&h.CreatedAt,
-	)
-}
+func scanHabitRow(row pgx.Row, h *domain.Habit) error    { return scanHabit(row, h) }
+func scanHabitRows(rows pgx.Rows, h *domain.Habit) error { return scanHabit(rows, h) }
 
 func (r *HabitRepository) Create(ctx context.Context, habit *domain.Habit) error {
 	return r.pool.QueryRow(ctx,
@@ -137,18 +134,23 @@ func (r *HabitRepository) SetLastNotifiedAt(ctx context.Context, habitID int64, 
 	return err
 }
 
-func (r *HabitRepository) ListAllWithTelegramID(ctx context.Context) ([]*domain.HabitWithTelegramID, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT h.id, h.user_id, h.name, h.description, h.interval_minutes, h.start_hour, h.end_hour,
-		        h.last_done_at, h.last_notified_at, h.streak, h.best_streak, h.is_paused, h.goal_days, h.snooze_until, h.created_at,
-		        u.telegram_id, u.timezone, u.first_name, u.language, u.id, u.evening_recap_hour
-		 FROM habits h JOIN users u ON u.id = h.user_id`,
-	)
+const habitsWithUserSelect = `
+	SELECT h.id, h.user_id, h.name, h.description, h.interval_minutes, h.start_hour, h.end_hour,
+	       h.last_done_at, h.last_notified_at, h.streak, h.best_streak, h.is_paused, h.goal_days, h.snooze_until, h.created_at,
+	       u.telegram_id, u.timezone, u.first_name, u.language, u.id, u.evening_recap_hour
+	FROM habits h JOIN users u ON u.id = h.user_id`
+
+func (r *HabitRepository) listHabitsWithUser(ctx context.Context, where string, args ...any) ([]*domain.HabitWithTelegramID, error) {
+	rows, err := r.pool.Query(ctx, habitsWithUserSelect+where, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanHabitsWithUser(rows)
+}
+
+func (r *HabitRepository) ListAllWithTelegramID(ctx context.Context) ([]*domain.HabitWithTelegramID, error) {
+	return r.listHabitsWithUser(ctx, "")
 }
 
 func (r *HabitRepository) ResetStreaksForInactive(ctx context.Context) error {
@@ -161,19 +163,9 @@ func (r *HabitRepository) ResetStreaksForInactive(ctx context.Context) error {
 }
 
 func (r *HabitRepository) ListStreaksToBeReset(ctx context.Context) ([]*domain.HabitWithTelegramID, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT h.id, h.user_id, h.name, h.description, h.interval_minutes, h.start_hour, h.end_hour,
-		        h.last_done_at, h.last_notified_at, h.streak, h.best_streak, h.is_paused, h.goal_days, h.snooze_until, h.created_at,
-		        u.telegram_id, u.timezone, u.first_name, u.language, u.id, u.evening_recap_hour
-		 FROM habits h JOIN users u ON u.id = h.user_id
-		 WHERE h.streak > 0
-		   AND (h.last_done_at IS NULL OR h.last_done_at::date < CURRENT_DATE - INTERVAL '1 day')`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanHabitsWithUser(rows)
+	return r.listHabitsWithUser(ctx, `
+		WHERE h.streak > 0
+		  AND (h.last_done_at IS NULL OR h.last_done_at::date < CURRENT_DATE - INTERVAL '1 day')`)
 }
 
 func scanHabitsWithUser(rows pgx.Rows) ([]*domain.HabitWithTelegramID, error) {

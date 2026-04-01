@@ -1,0 +1,244 @@
+package telegram
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
+
+	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
+)
+
+func templateKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💧 Пить воду", "template:water"),
+			tgbotapi.NewInlineKeyboardButtonData("🏃 Зарядка", "template:exercise"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📚 Читать", "template:read"),
+			tgbotapi.NewInlineKeyboardButtonData("🧘 Медитация", "template:meditate"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("😴 Режим сна", "template:sleep"),
+			tgbotapi.NewInlineKeyboardButtonData("✏️ Своя привычка", "template:custom"),
+		),
+	)
+}
+
+func (h *Handler) sendIntervalKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_interval"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(30, lang), "interval:30"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(60, lang), "interval:60"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(120, lang), "interval:120"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(180, lang), "interval:180"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(1440, lang), "interval:1440"),
+		),
+	)
+	_, err := h.api.Send(m)
+	return err
+}
+
+func hourButtons(prefix string, hours []int) [][]tgbotapi.InlineKeyboardButton {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < len(hours); i += 4 {
+		end := i + 4
+		if end > len(hours) {
+			end = len(hours)
+		}
+		var row []tgbotapi.InlineKeyboardButton
+		for _, h := range hours[i:end] {
+			row = append(row, tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%d:00", h),
+				fmt.Sprintf("%s:%d", prefix, h),
+			))
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func (h *Handler) sendStartHourKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_start"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(hourButtons("start_hour", []int{5, 6, 7, 8, 9, 10, 11, 12})...)
+	_, err := h.api.Send(m)
+	return err
+}
+
+func (h *Handler) sendEndHourKeyboard(chatID int64, lang i18n.Lang, minHour int) error {
+	all := []int{14, 16, 18, 20, 21, 22, 23}
+	var valid []int
+	for _, hr := range all {
+		if hr > minHour {
+			valid = append(valid, hr)
+		}
+	}
+	if len(valid) == 0 {
+		h.send(chatID, i18n.T(lang, "error.generic"))
+		h.clearState(chatID)
+		return nil
+	}
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_end"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(hourButtons("end_hour", valid)...)
+	_, err := h.api.Send(m)
+	return err
+}
+
+func (h *Handler) sendGoalKeyboard(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_goal"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 21), "add_goal:21"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 30), "add_goal:30"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 66), "add_goal:66"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 100), "add_goal:100"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.no_goal"), "add_goal:0"),
+		),
+	)
+	_, err := h.api.Send(m)
+	return err
+}
+
+func (h *Handler) sendEditIntervalKeyboard(chatID, habitID int64, lang i18n.Lang) {
+	id := fmt.Sprintf("%d", habitID)
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_interval"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(30, lang), "edit_interval:"+id+":30"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(60, lang), "edit_interval:"+id+":60"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(120, lang), "edit_interval:"+id+":120"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(180, lang), "edit_interval:"+id+":180"),
+			tgbotapi.NewInlineKeyboardButtonData(formatInterval(1440, lang), "edit_interval:"+id+":1440"),
+		),
+	)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send edit interval keyboard", zap.Error(err))
+	}
+}
+
+func (h *Handler) sendEditStartHourKeyboard(chatID, habitID int64, lang i18n.Lang) {
+	id := fmt.Sprintf("%d", habitID)
+	prefix := "edit_start:" + id
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_start"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(hourButtons(prefix, []int{5, 6, 7, 8, 9, 10, 11, 12})...)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send edit start hour keyboard", zap.Error(err))
+	}
+}
+
+func (h *Handler) sendEditEndHourKeyboard(chatID, habitID int64, minHour int, lang i18n.Lang) {
+	id := fmt.Sprintf("%d", habitID)
+	prefix := "edit_end:" + id
+	all := []int{14, 16, 18, 20, 21, 22, 23}
+	var valid []int
+	for _, hr := range all {
+		if hr > minHour {
+			valid = append(valid, hr)
+		}
+	}
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_end"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(hourButtons(prefix, valid)...)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send edit end hour keyboard", zap.Error(err))
+	}
+}
+
+func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convState) error {
+	switch state.Step {
+	case stepIdle:
+		m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
+		m.ReplyMarkup = templateKeyboard()
+		_, err := h.api.Send(m)
+		return err
+	case stepAwaitInterval:
+		return h.sendIntervalKeyboard(chatID, lang)
+	case stepAwaitStartHour:
+		return h.sendStartHourKeyboard(chatID, lang)
+	case stepAwaitEndHour:
+		return h.sendEndHourKeyboard(chatID, lang, state.StartHour+1)
+	case stepAwaitGoal:
+		return h.sendGoalKeyboard(chatID, lang)
+	default:
+		return nil
+	}
+}
+
+func doneMessage(name string, streak, goalDays int, lang i18n.Lang) string {
+	if goalDays > 0 && streak > 0 {
+		return i18n.T(lang, "habit.done_goal", name, streak, goalDays)
+	}
+	if streak > 0 {
+		return i18n.T(lang, "habit.done_streak", name, streak)
+	}
+	return i18n.T(lang, "habit.done_simple")
+}
+
+func formatInterval(minutes int, lang string) string {
+	switch {
+	case minutes >= 1440:
+		return i18n.T(lang, "interval.daily")
+	case minutes == 60:
+		return i18n.T(lang, "interval.hourly")
+	case minutes >= 60:
+		return i18n.T(lang, "interval.every_n_hours", minutes/60)
+	default:
+		return i18n.T(lang, "interval.every_n_min", minutes)
+	}
+}
+
+func progressBar(done, total int) string {
+	const width = 10
+	if total == 0 {
+		return strings.Repeat("░", width)
+	}
+	filled := done * width / total
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+func buildHeatmap(habitName string, from, to time.Time, doneSet map[string]bool, lang string) string {
+	weekdays := []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
+	start := from
+	for start.Weekday() != time.Monday {
+		start = start.AddDate(0, 0, -1)
+	}
+	grid := [7][4]string{}
+	for row := 0; row < 7; row++ {
+		for col := 0; col < 4; col++ {
+			day := start.AddDate(0, 0, col*7+row)
+			if day.After(to) {
+				grid[row][col] = " "
+				continue
+			}
+			if doneSet[day.Format("2006-01-02")] {
+				grid[row][col] = "■"
+			} else {
+				grid[row][col] = "□"
+			}
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString(i18n.T(lang, "history.header", habitName))
+	sb.WriteString("\n")
+	for row := 0; row < 7; row++ {
+		sb.WriteString(weekdays[row] + " ")
+		for col := 0; col < 4; col++ {
+			sb.WriteString(grid[row][col] + " ")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(i18n.T(lang, "history.legend"))
+	return sb.String()
+}
