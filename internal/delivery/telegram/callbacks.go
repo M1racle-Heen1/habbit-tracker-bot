@@ -88,6 +88,7 @@ func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 	h.editMsg(chatID, msgID, i18n.T(lang, "habit.created",
 		habit.Name, formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour,
 	))
+	h.sendMainNav(chatID, lang)
 }
 
 func (h *Handler) cbInterval(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
