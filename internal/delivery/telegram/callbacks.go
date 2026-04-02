@@ -212,7 +212,7 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 
 	if err := h.habitUC.MarkDone(ctx, user.ID, habitID); err != nil {
 		if errors.Is(err, domain.ErrAlreadyDone) {
-			h.editMsg(chatID, msgID, i18n.T(lang, "habit.already_done"))
+			h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.already_done"))
 			return
 		}
 		h.logger.Error("MarkDone", zap.Error(err))
