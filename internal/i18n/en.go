@@ -144,4 +144,9 @@ var enMessages = map[string]string{
 	"habit.done_btn":           "✅ Mark Done",
 	"habit.delete_btn":         "🗑 Delete",
 	"history.btn":              "📅 History",
+	"stats.today_line":         "Today:      %d/%d done",
+	"stats.week_line":          "This week:  %d%% (%d/%d)",
+	"stats.month_line":         "This month: %d%% (%d/%d)",
+	"stats.habit_btn":          "%s  🔥%d  %d%%",
+	"stats.habit_btn_paused":   "%s  ⏸ paused",
 }

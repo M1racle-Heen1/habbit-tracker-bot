@@ -64,3 +64,22 @@ func TestWelcomeScreenKeyExistsAllLangs(t *testing.T) {
 		}
 	}
 }
+
+func TestStatsKeysExistAllLangs(t *testing.T) {
+	keys := []string{
+		"stats.today_line",
+		"stats.week_line",
+		"stats.month_line",
+		"stats.habit_btn",
+		"stats.habit_btn_paused",
+	}
+	langs := []i18n.Lang{i18n.RU, i18n.EN, i18n.KZ}
+	for _, lang := range langs {
+		for _, key := range keys {
+			got := i18n.T(lang, key)
+			if got == key || got == "" {
+				t.Errorf("lang=%s key=%s: missing translation (got %q)", lang, key, got)
+			}
+		}
+	}
+}

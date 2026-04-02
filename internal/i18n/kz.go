@@ -144,4 +144,9 @@ var kzMessages = map[string]string{
 	"habit.done_btn":           "✅ Орындау",
 	"habit.delete_btn":         "🗑 Жою",
 	"history.btn":              "📅 Тарих",
+	"stats.today_line":         "Бүгін:       %d/%d",
+	"stats.week_line":          "Осы апта:    %d%% (%d/%d)",
+	"stats.month_line":         "Осы ай:      %d%% (%d/%d)",
+	"stats.habit_btn":          "%s  🔥%d  %d%%",
+	"stats.habit_btn_paused":   "%s  ⏸ үзіліс",
 }

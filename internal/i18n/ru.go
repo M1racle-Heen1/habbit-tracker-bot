@@ -144,4 +144,9 @@ var ruMessages = map[string]string{
 	"habit.done_btn":           "✅ Выполнить",
 	"habit.delete_btn":         "🗑 Удалить",
 	"history.btn":              "📅 История",
+	"stats.today_line":         "Сегодня:     %d/%d",
+	"stats.week_line":          "Эта неделя:  %d%% (%d/%d)",
+	"stats.month_line":         "Этот месяц:  %d%% (%d/%d)",
+	"stats.habit_btn":          "%s  🔥%d  %d%%",
+	"stats.habit_btn_paused":   "%s  ⏸ пауза",
 }
