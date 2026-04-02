@@ -257,33 +257,97 @@ func (h *Handler) sendHabitPickerKeyboard(ctx context.Context, chatID int64, use
 
 func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
 	lang := h.lang(user)
-	stats, err := h.habitUC.GetStats(ctx, user.ID, 30)
+
+	habits, err := h.habitUC.ListHabits(ctx, user.ID)
 	if err != nil {
-		h.logger.Error("GetStats", zap.Error(err))
+		h.logger.Error("ListHabits stats", zap.Int64("user_id", user.ID), zap.Error(err))
 		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
 		return
 	}
-	if len(stats) == 0 {
+	weekStats, err := h.habitUC.GetStats(ctx, user.ID, 7)
+	if err != nil {
+		h.logger.Error("GetStats week", zap.Error(err))
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+	monthStats, err := h.habitUC.GetStats(ctx, user.ID, 30)
+	if err != nil {
+		h.logger.Error("GetStats month", zap.Error(err))
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+	if len(monthStats) == 0 {
 		h.send(msg.Chat.ID, i18n.T(lang, "stats.empty"))
 		return
 	}
 
+	// Today done / total (non-paused habits only)
+	now := time.Now()
+	todayTotal, todayDone := 0, 0
+	for _, habit := range habits {
+		if habit.IsPaused {
+			continue
+		}
+		todayTotal++
+		if usecase.IsDoneToday(habit, now) {
+			todayDone++
+		}
+	}
+
+	// Week aggregation
+	weekCompleted, weekTotal := 0, 0
+	for _, s := range weekStats {
+		weekCompleted += s.CompletedDays
+		weekTotal += s.TotalDays
+	}
+	weekPct := 0
+	if weekTotal > 0 {
+		weekPct = weekCompleted * 100 / weekTotal
+	}
+
+	// Month aggregation
+	monthCompleted, monthTotal := 0, 0
+	for _, s := range monthStats {
+		monthCompleted += s.CompletedDays
+		monthTotal += s.TotalDays
+	}
+	monthPct := 0
+	if monthTotal > 0 {
+		monthPct = monthCompleted * 100 / monthTotal
+	}
+
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "stats.header"))
-	for _, s := range stats {
-		bar := progressBar(s.CompletedDays, s.TotalDays)
-		sb.WriteString(fmt.Sprintf("%s  %s  %d/%d (%d%%)\n", s.Habit.Name, bar, s.CompletedDays, s.TotalDays, s.CompletionPct))
-		if s.Habit.GoalDays > 0 {
-			goalBar := progressBar(s.Habit.Streak, s.Habit.GoalDays)
-			sb.WriteString(fmt.Sprintf("   🎯 %s %d/%d days\n", goalBar, s.Habit.Streak, s.Habit.GoalDays))
-		}
-		if s.Habit.Streak > 0 || s.Habit.BestStreak > 0 {
-			sb.WriteString(i18n.T(lang, "stats.streak_line", s.Habit.Streak, s.Habit.BestStreak))
-		}
-		sb.WriteString("\n")
-	}
+	sb.WriteString("\n")
+	sb.WriteString(i18n.T(lang, "stats.today_line", todayDone, todayTotal))
+	sb.WriteString("\n")
+	sb.WriteString(i18n.T(lang, "stats.week_line", weekPct, weekCompleted, weekTotal))
+	sb.WriteString("\n")
+	sb.WriteString(i18n.T(lang, "stats.month_line", monthPct, monthCompleted, monthTotal))
+	sb.WriteString("\n\n")
 	sb.WriteString(i18n.T(lang, "stats.xp_level", user.Level, user.XP, user.StreakShields))
-	h.send(msg.Chat.ID, sb.String())
+
+	// Per-habit buttons (tapping opens history)
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, s := range monthStats {
+		var label string
+		if s.Habit.IsPaused {
+			label = i18n.T(lang, "stats.habit_btn_paused", s.Habit.Name)
+		} else {
+			label = i18n.T(lang, "stats.habit_btn", s.Habit.Name, s.Habit.Streak, s.CompletionPct)
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("history:%d", s.Habit.ID)),
+		))
+	}
+
+	m := tgbotapi.NewMessage(msg.Chat.ID, sb.String())
+	if len(rows) > 0 {
+		m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send stats", zap.Error(err))
+	}
 }
 
 func (h *Handler) handleHistory(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
