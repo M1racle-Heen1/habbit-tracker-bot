@@ -36,7 +36,11 @@ internal/usecase/
   user.go, habit.go            → business logic + scheduler helpers (IsDoneToday, ShouldSendInterval, etc.)
 internal/delivery/telegram/
   bot.go                       → polling loop + sets bot command menu on start
-  handler.go                   → multi-step conversation state machine + callback query routing
+  handler.go                   → Handler struct, routing (HandleUpdate/handleCommand/handleCallback/handleText),
+                                  state helpers, getUserFromCallback helper, editMsg/editMsgAndClearMarkup helpers
+  commands.go                  → all /xxx command handlers
+  callbacks.go                 → all callback handlers + undoKey/timerKey helpers
+  keyboards.go                 → all keyboard builders, hourButtons helper, pure formatting functions
 internal/repository/postgres/  → pgxpool implementations; wraps pgx.ErrNoRows → domain.ErrNotFound
 internal/repository/redis/     → Cache implementation
 internal/scheduler/            → ticker every minute; reminders, streak resets, evening recap, streak-risk alert, timer expiry
@@ -69,6 +73,14 @@ Repositories are bound to interfaces via `fx.Annotate(..., fx.As(new(usecase.XRe
 - All business logic (streak calculation, reminder eligibility) lives in `usecase/`; handlers only route.
 - Conversation state is **Redis-backed** (`state:{telegramID}` key, JSON-encoded `convState`), not in-memory.
 
+### Delivery layer patterns
+
+**Loading the user in callbacks:** use `getUserFromCallback(ctx, cq)` — it calls `GetOrCreateUser`, sends an error message on failure, and returns `(user, lang, err)`. Never repeat the inline pattern.
+
+**Editing messages:** use `editMsgAndClearMarkup` for any **definitive** action (habit created, marked done, deleted, paused, goal set, etc.) so old inline buttons become inert. Use `editMsg` only for mid-wizard confirmations where the next keyboard immediately follows.
+
+**convState fields:** `Step`, `HabitName`, `IntervalMinutes`, `StartHour`, `EndHour`, `EditHabitID`, `Lang`. `EndHour` stores the end hour during the add-habit wizard; `EditHabitID` stores the habit being edited during the edit-habit wizard. Do not reuse fields across flows.
+
 ### i18n
 
 All user-facing strings go through `i18n.T(lang, key, args...)`. `lang` is always `user.Language` (stored in DB). Missing keys fall back to the English key string — never panic. Add new keys to all three files (`ru.go`, `en.go`, `kz.go`).
@@ -83,12 +95,12 @@ XP per completion: `+10 base + min(streak, 20) bonus`. Level thresholds: 1→0, 
 
 | Command | Handler | Notes |
 |---------|---------|-------|
-| `/start` | `handleStart` | 3-step onboarding for new users (language → timezone → first habit); welcome for returning |
+| `/start` | `handleStart` | Language picker for new users; welcome for returning |
 | `/add_habit` | `startAddHabit` | Multi-step: template picker or custom → name → interval → start hour → end hour → goal (optional) |
-| `/list_habits` | `handleListHabits` | ✅/○ status + streak + pause/resume/edit/goal inline menus |
+| `/list_habits` | `handleListHabits` | ✅/○ status + streak + inline done buttons |
 | `/done` | `handleDone` | Inline keyboard → `done:{id}` callback → `MarkDone` → undo button (5 min TTL) |
 | `/today` | `handleToday` | Incomplete habits only; `[✅ Name][⏱]` per row + bulk "all done" button |
-| `/stats` | `handleStats` | Completion bar, streak/best-streak line, XP/level/shields footer |
+| `/stats` | `handleStats` | Today/week/month summary header + per-habit tappable buttons (opens history) |
 | `/history` | `handleHistory` | Habit picker → `history:{id}` → ASCII 28-day heatmap |
 | `/achievements` | `handleAchievements` | Lists earned achievements with unlock dates |
 | `/language` | `handleLanguage` | Inline keyboard: RU / EN / KZ |
@@ -98,16 +110,14 @@ XP per completion: `+10 base + min(streak, 20) bonus`. Level thresholds: 1→0, 
 | `/resume_habit` | `handleResumeHabit` | Resume paused habit |
 | `/delete_habit` | `handleDeleteHabit` | Two-step confirm |
 
-**Conversation state steps** (`step` enum in handler.go):
+**Conversation state steps** (`step` enum in `handler.go`):
 - `stepIdle` — no active wizard
 - `stepAwaitName / Interval / StartHour / EndHour / Goal` — add-habit wizard
 - `stepEditAwaitName / EditAwaitEndHour` — edit-habit wizard
-- `stepOnboardTimezone` — new-user onboarding: waiting for timezone after language chosen
-- `stepOnboardHabit` — new-user onboarding: waiting for Yes/Later on first habit
 
 **Callback data format:** `action:arg` or `action:arg1:arg2`. All callbacks are routed in `handleCallback` via a switch on the action prefix.
 
-**Key callback prefixes:** `done`, `done_all`, `undo`, `timer_start`, `timer_set`, `lang`, `tz`, `tz_ob`, `onboard_habit`, `snooze`, `template`, `interval`, `pre_delete`, `confirm_delete`, `pause`, `resume`, `edit`, `edit_name`, `edit_interval`, `edit_start`, `edit_end`, `set_goal`, `goal_menu`, `add_goal`, `history`.
+**Key callback prefixes:** `done`, `done_all`, `undo`, `timer_start`, `timer_set`, `lang`, `tz`, `snooze`, `template`, `interval`, `start_hour`, `end_hour`, `add_goal`, `pre_delete`, `confirm_delete`, `cancel_delete`, `pause`, `resume`, `edit`, `edit_name`, `edit_interval`, `edit_start`, `edit_end`, `set_goal`, `goal_menu`, `history`.
 
 ### Redis key patterns
 
@@ -120,7 +130,6 @@ XP per completion: `+10 base + min(streak, 20) bonus`. Level thresholds: 1→0, 
 | `evening:{telegramID}:{date}` | `"1"` | 25h | Evening recap dedup |
 | `streak_risk:{telegramID}:{date}` | `"1"` | 25h | Streak-risk alert dedup |
 | `weekly:{telegramID}:{date}` | `"1"` | 25h | Weekly digest dedup |
-| `snooze:{habitID}` | — | snooze duration | (stored on habit.SnoozeUntil in DB) |
 
 ### Scheduler behaviors (every minute tick)
 
@@ -155,6 +164,6 @@ Files live in `migrations/` as `{N}_{name}.up.sql` / `{N}_{name}.down.sql`. Curr
 2. Interface method → `internal/usecase/interfaces.go`
 3. Implementation → `internal/repository/postgres/`
 4. Use case method → `internal/usecase/`
-5. Handler + i18n keys (all 3 lang files) → `delivery/telegram/handler.go`
+5. Command handler → `delivery/telegram/commands.go`; callback handlers → `delivery/telegram/callbacks.go`; keyboards → `delivery/telegram/keyboards.go`; i18n keys (all 3 lang files)
 6. Wire in `internal/app/app.go` if new provider needed
 7. Migration → `migrations/{N}_{name}.up.sql` + `.down.sql`
