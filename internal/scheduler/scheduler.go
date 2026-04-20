@@ -5,27 +5,63 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
 
 	"github.com/saidakmal/habbit-tracker-bot/internal/domain"
+	"github.com/saidakmal/habbit-tracker-bot/internal/format"
 	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
 	"github.com/saidakmal/habbit-tracker-bot/internal/usecase"
 )
 
+const midnightLockKey = "scheduler:midnight:lock"
+
 type Scheduler struct {
 	habitUC  *usecase.HabitUsecase
 	userUC   *usecase.UserUsecase
+	moodUC   *usecase.MoodUsecase
 	api      *tgbotapi.BotAPI
 	logger   *zap.Logger
 	location *time.Location
 	cache    usecase.Cache
+	locCache map[string]*time.Location
+	locMu    sync.RWMutex
 }
 
-func New(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, loc *time.Location, cache usecase.Cache) *Scheduler {
-	return &Scheduler{habitUC: habitUC, userUC: userUC, api: api, logger: logger, location: loc, cache: cache}
+func New(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, moodUC *usecase.MoodUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, loc *time.Location, cache usecase.Cache) *Scheduler {
+	return &Scheduler{
+		habitUC:  habitUC,
+		userUC:   userUC,
+		moodUC:   moodUC,
+		api:      api,
+		logger:   logger,
+		location: loc,
+		cache:    cache,
+		locCache: make(map[string]*time.Location),
+	}
+}
+
+// loadLocation returns a cached *time.Location for tz, falling back to the default location on error.
+func (s *Scheduler) loadLocation(tz string) *time.Location {
+	s.locMu.RLock()
+	if loc, ok := s.locCache[tz]; ok {
+		s.locMu.RUnlock()
+		return loc
+	}
+	s.locMu.RUnlock()
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return s.location
+	}
+
+	s.locMu.Lock()
+	s.locCache[tz] = loc
+	s.locMu.Unlock()
+	return loc
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
@@ -49,10 +85,13 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 		return
 	}
 
-	// Midnight check in default timezone — reset streaks and notify
+	// Midnight check in default timezone — reset streaks and notify.
+	// Redis lock prevents double-execution on restart at midnight.
 	defaultNow := now.In(s.location)
 	if defaultNow.Hour() == 0 && defaultNow.Minute() == 0 {
-		s.resetStreaksAndNotify(ctx)
+		if ok, err := s.cache.SetNX(ctx, midnightLockKey, "1", 2*time.Hour); err == nil && ok {
+			s.resetStreaksAndNotify(ctx)
+		}
 	}
 
 	// Group habits by user
@@ -81,11 +120,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 	}
 
 	for _, g := range groups {
-		loc, err := time.LoadLocation(g.userTimezone)
-		if err != nil {
-			loc = s.location
-		}
-		userNow := now.In(loc)
+		userNow := now.In(s.loadLocation(g.userTimezone))
 
 		lang := g.userLang
 		if lang == "" {
@@ -169,6 +204,9 @@ func (s *Scheduler) sendReminder(ctx context.Context, telegramID int64, h *domai
 		streakText = i18n.T(lang, "reminder.streak", h.Streak)
 	}
 	text := i18n.T(lang, "reminder.text", h.Name) + streakText
+	if h.Motivation != "" {
+		text += "\n" + i18n.T(lang, "reminder.motivation", h.Motivation)
+	}
 
 	msg := tgbotapi.NewMessage(telegramID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
@@ -213,7 +251,7 @@ func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64
 		} else {
 			streakStr := ""
 			if hw.Streak > 0 {
-				streakStr = fmt.Sprintf(" (стрик: %d)", hw.Streak)
+				streakStr = " " + i18n.T(lang, "reminder.streak", hw.Streak)
 			}
 			sb.WriteString(fmt.Sprintf("○ %s%s\n", hw.Name, streakStr))
 			doneButtons = append(doneButtons, tgbotapi.NewInlineKeyboardRow(
@@ -279,8 +317,48 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 	overall := totalDone * 100 / totalPossible
 	sb.WriteString(i18n.T(lang, "weekly.overall", totalDone, totalPossible, overall))
 
+	// Mood summary for the week.
+	weekFrom := now.AddDate(0, 0, -6)
+	moods, err := s.moodUC.GetWeekMoods(ctx, userID, weekFrom, now.AddDate(0, 0, 1))
+	if err != nil {
+		s.logger.Warn("weekly mood query", zap.Error(err))
+	}
+	if len(moods) > 0 {
+		sb.WriteString(format.BuildMoodSummary(moods, lang))
+		if format.CountMood(moods, 1) >= 3 {
+			s.sendBurnoutAlert(ctx, telegramID, habits, lang)
+		}
+	}
+
+	// Day-of-week insights (requires a user timezone lookup).
+	if user, err := s.userUC.GetByID(ctx, userID); err == nil {
+		dow, err := s.habitUC.GetDayOfWeekStats(ctx, userID, user.Timezone)
+		if err == nil && len(dow) > 0 {
+			best, worst := format.BestAndWorstDay(dow)
+			sb.WriteString(format.BuildDayOfWeekInsight(dow, best, worst, lang))
+		}
+	}
+
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send weekly digest", zap.Int64("telegram_id", telegramID), zap.Error(err))
+	}
+}
+
+func (s *Scheduler) sendBurnoutAlert(ctx context.Context, telegramID int64, habits []*domain.HabitWithTelegramID, lang string) {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, hw := range habits {
+		if !hw.IsPaused {
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("⏸ "+hw.Name, fmt.Sprintf("pause:%d", hw.ID)),
+			))
+		}
+	}
+	msg := tgbotapi.NewMessage(telegramID, i18n.T(lang, "mood.burnout_alert"))
+	if len(rows) > 0 {
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	if _, err := s.api.Send(msg); err != nil {
+		s.logger.Error("send burnout alert", zap.Int64("telegram_id", telegramID), zap.Error(err))
 	}
 }
 
@@ -336,6 +414,27 @@ func (s *Scheduler) maybeSendEveningRecap(ctx context.Context, telegramID int64,
 
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send evening recap", zap.Int64("telegram_id", telegramID), zap.Error(err))
+		return
+	}
+
+	moodKey := fmt.Sprintf("mood_prompt:%d:%s", telegramID, now.Format("2006-01-02"))
+	if _, err := s.cache.Get(ctx, moodKey); err != nil {
+		logged, err := s.moodUC.HasLoggedToday(ctx, userID)
+		if err == nil && !logged {
+			moodMsg := tgbotapi.NewMessage(telegramID, i18n.T(lang, "mood.check_in"))
+			moodMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.great"), "mood:3"),
+					tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.okay"), "mood:2"),
+					tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.tough"), "mood:1"),
+				),
+			)
+			if _, err := s.api.Send(moodMsg); err != nil {
+				s.logger.Error("send evening mood prompt", zap.Int64("telegram_id", telegramID), zap.Error(err))
+			} else {
+				_ = s.cache.Set(ctx, moodKey, "1", 25*time.Hour)
+			}
+		}
 	}
 }
 
@@ -345,22 +444,20 @@ func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, l
 		return
 	}
 
-	var at_risk []struct {
+	type atRiskEntry struct {
 		name   string
 		streak int
 	}
+	var atRisk []atRiskEntry
 	for _, hw := range habits {
 		if hw.IsPaused || hw.Streak == 0 {
 			continue
 		}
 		if !usecase.IsDoneToday(&hw.Habit, now) {
-			at_risk = append(at_risk, struct {
-				name   string
-				streak int
-			}{hw.Name, hw.Streak})
+			atRisk = append(atRisk, atRiskEntry{hw.Name, hw.Streak})
 		}
 	}
-	if len(at_risk) == 0 {
+	if len(atRisk) == 0 {
 		return
 	}
 
@@ -373,7 +470,7 @@ func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, l
 	}
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "streak.risk_header"))
-	for _, r := range at_risk {
+	for _, r := range atRisk {
 		sb.WriteString(i18n.T(lang, "streak.risk_line", r.name, r.streak))
 	}
 	sb.WriteString(i18n.T(lang, "streak.risk_footer"))
@@ -383,45 +480,68 @@ func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, l
 	}
 }
 
+type userShieldRecord struct {
+	lang       string
+	protected  bool
+	newShields int
+}
+
+// resetStreaksAndNotify resets streaks for inactive habits, respecting streak shields.
+// Shields are checked BEFORE the reset: a user with shields has ALL their habits
+// protected for the night (one shield consumed per user, not per habit).
 func (s *Scheduler) resetStreaksAndNotify(ctx context.Context) {
-	toNotify, err := s.habitUC.ListStreaksToBeReset(ctx)
+	toReset, err := s.habitUC.ListStreaksToBeReset(ctx)
 	if err != nil {
 		s.logger.Error("ListStreaksToBeReset", zap.Error(err))
+		return
 	}
 
-	if err := s.habitUC.ResetStreaks(ctx); err != nil {
-		s.logger.Error("ResetStreaks", zap.Error(err))
-	}
-
-	for _, hw := range toNotify {
-		user, err := s.userUC.GetByID(ctx, hw.UserID)
-		lang := i18n.RU
-		shields := 0
-		if err == nil {
-			lang = user.Language
-			if lang == "" {
-				lang = i18n.RU
-			}
-			shields = user.StreakShields
+	// Resolve each user's shield state once to avoid repeated DB calls and
+	// to ensure 1 shield protects ALL habits for that user this night.
+	userRecords := make(map[int64]*userShieldRecord, len(toReset))
+	for _, hw := range toReset {
+		if _, seen := userRecords[hw.UserID]; seen {
+			continue
 		}
-
-		if shields > 0 {
-			newShields := shields - 1
-			if err := s.userUC.UpdateStreakShields(ctx, hw.UserID, newShields); err != nil {
-				s.logger.Warn("UpdateStreakShields", zap.Error(err))
+		rec := &userShieldRecord{lang: i18n.RU}
+		user, err := s.userUC.GetByID(ctx, hw.UserID)
+		if err == nil {
+			if user.Language != "" {
+				rec.lang = user.Language
 			}
-			text := i18n.T(lang, "shield.used", hw.Name, newShields)
+			if user.StreakShields > 0 {
+				rec.protected = true
+				rec.newShields = user.StreakShields - 1
+				if err := s.userUC.UpdateStreakShields(ctx, hw.UserID, rec.newShields); err != nil {
+					s.logger.Warn("UpdateStreakShields", zap.Error(err))
+				}
+			}
+		}
+		userRecords[hw.UserID] = rec
+	}
+
+	for _, hw := range toReset {
+		rec := userRecords[hw.UserID]
+
+		if rec.protected {
+			// Shield active: streak is preserved, just notify the user.
+			text := i18n.T(rec.lang, "shield.used", hw.Name, rec.newShields)
 			if _, err := s.api.Send(tgbotapi.NewMessage(hw.TelegramID, text)); err != nil {
 				s.logger.Error("send shield used", zap.Int64("telegram_id", hw.TelegramID), zap.Error(err))
 			}
 			continue
 		}
 
-		text := i18n.T(lang, "streak.broken", hw.Name, hw.Streak)
+		// No shield: reset this habit's streak in DB, then notify.
+		if err := s.habitUC.ResetHabitStreak(ctx, hw.ID); err != nil {
+			s.logger.Error("ResetHabitStreak", zap.Int64("habit_id", hw.ID), zap.Error(err))
+		}
+
+		text := i18n.T(rec.lang, "streak.broken", hw.Name, hw.Streak)
 		msg := tgbotapi.NewMessage(hw.TelegramID, text)
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "streak.do_now"), fmt.Sprintf("done:%d", hw.ID)),
+				tgbotapi.NewInlineKeyboardButtonData(i18n.T(rec.lang, "streak.do_now"), fmt.Sprintf("done:%d", hw.ID)),
 			),
 		)
 		if _, err := s.api.Send(msg); err != nil {
