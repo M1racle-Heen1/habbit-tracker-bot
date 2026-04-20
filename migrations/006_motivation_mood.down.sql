@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS mood_logs;
+ALTER TABLE habits DROP COLUMN IF EXISTS motivation;
