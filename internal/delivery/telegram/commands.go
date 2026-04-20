@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/saidakmal/habbit-tracker-bot/internal/domain"
+	"github.com/saidakmal/habbit-tracker-bot/internal/format"
 	"github.com/saidakmal/habbit-tracker-bot/internal/gamification"
 	"github.com/saidakmal/habbit-tracker-bot/internal/i18n"
 	"github.com/saidakmal/habbit-tracker-bot/internal/usecase"
@@ -35,7 +36,7 @@ func (h *Handler) handleStart(ctx context.Context, msg *tgbotapi.Message, user *
 	habits, _ := h.habitUC.ListHabits(ctx, user.ID)
 	if len(habits) == 0 {
 		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "onboarding.welcome_new", user.FirstName))
-		m.ReplyMarkup = templateKeyboard()
+		m.ReplyMarkup = templateKeyboard(lang)
 		if _, err := h.api.Send(m); err != nil {
 			h.logger.Error("send start", zap.Error(err))
 		}
@@ -83,7 +84,7 @@ func (h *Handler) startAddHabit(msg *tgbotapi.Message, user *domain.User) {
 	lang := h.lang(user)
 	h.setState(msg.From.ID, &convState{Step: stepIdle, Lang: lang})
 	m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "habit.choose_template"))
-	m.ReplyMarkup = templateKeyboard()
+	m.ReplyMarkup = templateKeyboard(lang)
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send template keyboard", zap.Error(err))
 	}
@@ -370,6 +371,38 @@ func (h *Handler) handleHistory(ctx context.Context, msg *tgbotapi.Message, user
 	}
 }
 
+func (h *Handler) handleMood(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	today := time.Now()
+	moods, err := h.moodUC.GetWeekMoods(ctx, user.ID, today, today.AddDate(0, 0, 1))
+	if err != nil {
+		h.logger.Error("handleMood GetWeekMoods", zap.Error(err))
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.great"), "mood:3"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.okay"), "mood:2"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.tough"), "mood:1"),
+		),
+	)
+
+	if len(moods) > 0 {
+		moodEmojis := map[int]string{1: "😞", 2: "😐", 3: "😊"}
+		emoji := moodEmojis[moods[0].Mood]
+		m := tgbotapi.NewMessage(msg.Chat.ID, i18n.T(lang, "mood.already_logged", emoji))
+		m.ReplyMarkup = keyboard
+		if _, err := h.api.Send(m); err != nil {
+			h.logger.Error("send mood already logged", zap.Error(err))
+		}
+		return
+	}
+
+	h.sendMoodPrompt(msg.Chat.ID, lang)
+}
+
 func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
 	lang := h.lang(user)
 	habits, err := h.habitUC.ListHabits(ctx, user.ID)
@@ -378,8 +411,35 @@ func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *
 		return
 	}
 	now := time.Now()
+
+	// Count totals for the progress bar header.
+	totalHabits, doneHabits := 0, 0
+	for _, habit := range habits {
+		if habit.IsPaused {
+			continue
+		}
+		totalHabits++
+		if usecase.IsDoneToday(habit, now) {
+			doneHabits++
+		}
+	}
+
+	if totalHabits == 0 {
+		h.send(msg.Chat.ID, i18n.T(lang, "today.none"))
+		return
+	}
+
+	if doneHabits == totalHabits {
+		h.send(msg.Chat.ID, i18n.T(lang, "today.all_done"))
+		return
+	}
+
+	bar := progressBar(doneHabits, totalHabits)
+	pct := doneHabits * 100 / totalHabits
+
 	var sb strings.Builder
-	sb.WriteString(i18n.T(lang, "today.header"))
+	sb.WriteString(i18n.T(lang, "today.header_progress", doneHabits, totalHabits, bar, pct))
+
 	var rows [][]tgbotapi.InlineKeyboardButton
 	pending := 0
 	for _, habit := range habits {
@@ -397,14 +457,7 @@ func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *
 			pending++
 		}
 	}
-	if pending == 0 && len(habits) == 0 {
-		h.send(msg.Chat.ID, i18n.T(lang, "today.none"))
-		return
-	}
-	if pending == 0 {
-		h.send(msg.Chat.ID, i18n.T(lang, "today.all_done"))
-		return
-	}
+
 	if pending >= 2 {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "today.done_all_btn"), "done_all:1"),
@@ -417,6 +470,22 @@ func (h *Handler) handleToday(ctx context.Context, msg *tgbotapi.Message, user *
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send today", zap.Error(err))
 	}
+}
+
+func (h *Handler) handleInsights(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {
+	lang := h.lang(user)
+	dow, err := h.habitUC.GetDayOfWeekStats(ctx, user.ID, user.Timezone)
+	if err != nil {
+		h.logger.Error("GetDayOfWeekStats", zap.Error(err))
+		h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		return
+	}
+	if len(dow) == 0 {
+		h.send(msg.Chat.ID, i18n.T(lang, "insights.not_enough_data"))
+		return
+	}
+	best, worst := format.BestAndWorstDay(dow)
+	h.send(msg.Chat.ID, format.BuildDayOfWeekInsight(dow, best, worst, string(lang)))
 }
 
 func (h *Handler) handleAchievements(ctx context.Context, msg *tgbotapi.Message, user *domain.User) {

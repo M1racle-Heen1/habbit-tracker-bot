@@ -27,8 +27,10 @@ const (
 	stepAwaitStartHour
 	stepAwaitEndHour
 	stepAwaitGoal
+	stepAwaitMotivation
 	stepEditAwaitName
-	stepEditAwaitEndHour // separate from stepAwaitEndHour to prevent cross-flow conflicts
+	stepEditAwaitEndHour     // separate from stepAwaitEndHour to prevent cross-flow conflicts
+	stepEditAwaitMotivation
 )
 
 type convState struct {
@@ -37,21 +39,22 @@ type convState struct {
 	IntervalMinutes int       `json:"interval_minutes"`
 	StartHour       int       `json:"start_hour"`
 	EndHour         int       `json:"end_hour"`
+	GoalDays        int       `json:"goal_days"`
+	Motivation      string    `json:"motivation"`
 	EditHabitID     int64     `json:"edit_habit_id"`
 	Lang            i18n.Lang `json:"lang"`
 }
 
 var habitTemplates = map[string]struct {
-	Name     string
 	Interval int
 	Start    int
 	End      int
 }{
-	"water":    {"💧 Пить воду", 60, 8, 22},
-	"exercise": {"🏃 Зарядка", 180, 7, 10},
-	"read":     {"📚 Читать", 480, 20, 23},
-	"sleep":    {"😴 Режим сна", 480, 21, 23},
-	"meditate": {"🧘 Медитация", 480, 7, 10},
+	"water":    {60, 8, 22},
+	"exercise": {180, 7, 10},
+	"read":     {480, 20, 23},
+	"sleep":    {480, 21, 23},
+	"meditate": {480, 7, 10},
 }
 
 var commonTimezones = []struct {
@@ -72,15 +75,17 @@ var commonTimezones = []struct {
 type Handler struct {
 	habitUC *usecase.HabitUsecase
 	userUC  *usecase.UserUsecase
+	moodUC  *usecase.MoodUsecase
 	api     *tgbotapi.BotAPI
 	logger  *zap.Logger
 	cache   usecase.Cache
 }
 
-func NewHandler(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, cache usecase.Cache) *Handler {
+func NewHandler(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, moodUC *usecase.MoodUsecase, api *tgbotapi.BotAPI, logger *zap.Logger, cache usecase.Cache) *Handler {
 	return &Handler{
 		habitUC: habitUC,
 		userUC:  userUC,
+		moodUC:  moodUC,
 		api:     api,
 		logger:  logger,
 		cache:   cache,
@@ -237,6 +242,10 @@ func (h *Handler) handleCommand(ctx context.Context, msg *tgbotapi.Message, user
 		h.handleAchievements(ctx, msg, user)
 	case "settings":
 		h.handleSettings(ctx, msg, user)
+	case "mood":
+		h.handleMood(ctx, msg, user)
+	case "insights":
+		h.handleInsights(ctx, msg, user)
 	case "health":
 		h.send(msg.Chat.ID, "OK")
 	}
@@ -282,7 +291,7 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 			return
 		}
 		h.clearState(msg.From.ID)
-		habit, err := h.habitUC.CreateHabit(ctx, user.ID, name, 120, 8, 22, 0)
+		habit, err := h.habitUC.CreateHabit(ctx, user.ID, name, 120, 8, 22, 0, "")
 		if err != nil {
 			h.logger.Error("CreateHabit custom", zap.Error(err))
 			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
@@ -290,6 +299,20 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 		}
 		h.send(msg.Chat.ID, i18n.T(lang, "habit.created_with_defaults", habit.Name))
 		h.sendMainNav(msg.Chat.ID, lang)
+
+	case stepAwaitMotivation:
+		motivation := strings.TrimSpace(msg.Text)
+		h.finishHabitCreation(ctx, msg.Chat.ID, msg.From.ID, state, motivation, lang, user)
+
+	case stepEditAwaitMotivation:
+		motivation := strings.TrimSpace(msg.Text)
+		if err := h.habitUC.SetMotivation(ctx, user.ID, state.EditHabitID, motivation); err != nil {
+			h.logger.Error("SetMotivation", zap.Error(err))
+			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
+		} else {
+			h.send(msg.Chat.ID, i18n.T(lang, "habit.motivation_saved"))
+		}
+		h.clearState(msg.From.ID)
 
 	case stepEditAwaitName:
 		name := strings.TrimSpace(msg.Text)
@@ -379,11 +402,11 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 	case "edit":
 		h.cbEditMenu(ctx, cq, chatID, arg)
 	case "edit_name":
-		h.cbEditName(cq, chatID, msgID, arg)
+		h.cbEditName(ctx, cq, chatID, msgID, arg)
 	case "edit_interval":
 		h.cbEditInterval(ctx, cq, chatID, msgID, arg)
 	case "edit_start":
-		h.cbEditStart(cq, chatID, msgID, arg)
+		h.cbEditStart(ctx, cq, chatID, msgID, arg)
 	case "edit_end":
 		h.cbEditEnd(ctx, cq, chatID, msgID, arg)
 	case "set_goal":
@@ -398,5 +421,11 @@ func (h *Handler) handleCallback(cq *tgbotapi.CallbackQuery) {
 		h.cbTimezoneOnboard(ctx, cq, chatID, msgID, arg)
 	case "onboard_skip":
 		h.cbOnboardSkip(ctx, cq, chatID, msgID)
+	case "add_motivation":
+		h.cbAddMotivation(ctx, cq, chatID, msgID, arg)
+	case "mood":
+		h.cbMood(ctx, cq, chatID, msgID, arg)
+	case "edit_motivation":
+		h.cbEditMotivation(ctx, cq, chatID, msgID, arg)
 	}
 }
