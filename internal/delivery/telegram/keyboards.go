@@ -56,26 +56,26 @@ func (h *Handler) sendTimezoneKeyboard(chatID int64, lang i18n.Lang, callbackPre
 }
 
 func onboardTemplateKeyboard(lang i18n.Lang) tgbotapi.InlineKeyboardMarkup {
-	base := templateKeyboard()
+	base := templateKeyboard(lang)
 	base.InlineKeyboard = append(base.InlineKeyboard, tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "onboarding.skip_btn"), "onboard_skip:1"),
 	))
 	return base
 }
 
-func templateKeyboard() tgbotapi.InlineKeyboardMarkup {
+func templateKeyboard(lang i18n.Lang) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("💧 Пить воду", "template:water"),
-			tgbotapi.NewInlineKeyboardButtonData("🏃 Зарядка", "template:exercise"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.water"), "template:water"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.exercise"), "template:exercise"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📚 Читать", "template:read"),
-			tgbotapi.NewInlineKeyboardButtonData("🧘 Медитация", "template:meditate"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.read"), "template:read"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.meditate"), "template:meditate"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("😴 Режим сна", "template:sleep"),
-			tgbotapi.NewInlineKeyboardButtonData("✏️ Своя привычка", "template:custom"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.sleep"), "template:sleep"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "template.custom"), "template:custom"),
 		),
 	)
 }
@@ -142,19 +142,27 @@ func (h *Handler) sendEndHourKeyboard(chatID int64, lang i18n.Lang, minHour int)
 	return err
 }
 
+var goalDayOptions = []int{21, 30, 66, 100, 0}
+
+func goalKeyboardRows(lang i18n.Lang, callbackPrefix func(days int) string) [][]tgbotapi.InlineKeyboardButton {
+	row1 := tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", goalDayOptions[0]), callbackPrefix(goalDayOptions[0])),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", goalDayOptions[1]), callbackPrefix(goalDayOptions[1])),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", goalDayOptions[2]), callbackPrefix(goalDayOptions[2])),
+	)
+	row2 := tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", goalDayOptions[3]), callbackPrefix(goalDayOptions[3])),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.no_goal"), callbackPrefix(goalDayOptions[4])),
+	)
+	return [][]tgbotapi.InlineKeyboardButton{row1, row2}
+}
+
 func (h *Handler) sendGoalKeyboard(chatID int64, lang i18n.Lang) error {
 	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_goal"))
-	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 21), "add_goal:21"),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 30), "add_goal:30"),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 66), "add_goal:66"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 100), "add_goal:100"),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.no_goal"), "add_goal:0"),
-		),
-	)
+	rows := goalKeyboardRows(lang, func(days int) string {
+		return fmt.Sprintf("add_goal:%d", days)
+	})
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	_, err := h.api.Send(m)
 	return err
 }
@@ -209,7 +217,7 @@ func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convSta
 	switch state.Step {
 	case stepIdle:
 		m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.choose_template"))
-		m.ReplyMarkup = templateKeyboard()
+		m.ReplyMarkup = templateKeyboard(lang)
 		_, err := h.api.Send(m)
 		return err
 	case stepAwaitInterval:
@@ -220,8 +228,35 @@ func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convSta
 		return h.sendEndHourKeyboard(chatID, lang, state.StartHour+1)
 	case stepAwaitGoal:
 		return h.sendGoalKeyboard(chatID, lang)
+	case stepAwaitMotivation:
+		return h.sendMotivationPrompt(chatID, lang)
 	default:
 		return nil
+	}
+}
+
+func (h *Handler) sendMotivationPrompt(chatID int64, lang i18n.Lang) error {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.enter_motivation"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "habit.motivation_skip"), "add_motivation:skip"),
+		),
+	)
+	_, err := h.api.Send(m)
+	return err
+}
+
+func (h *Handler) sendMoodPrompt(chatID int64, lang i18n.Lang) {
+	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "mood.check_in"))
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.great"), "mood:3"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.okay"), "mood:2"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "mood.tough"), "mood:1"),
+		),
+	)
+	if _, err := h.api.Send(m); err != nil {
+		h.logger.Error("send mood prompt", zap.Error(err))
 	}
 }
 

@@ -31,25 +31,27 @@ func New() *fx.App {
 			fx.Annotate(postgresrepo.NewUserRepository, fx.As(new(usecase.UserRepository))),
 			fx.Annotate(postgresrepo.NewHabitRepository, fx.As(new(usecase.HabitRepository))),
 			fx.Annotate(postgresrepo.NewActivityRepository, fx.As(new(usecase.ActivityRepository))),
+			fx.Annotate(postgresrepo.NewMoodRepository, fx.As(new(usecase.MoodRepository))),
 			fx.Annotate(redisrepo.NewCache, fx.As(new(usecase.Cache))),
 			usecase.NewUserUsecase,
 			usecase.NewHabitUsecase,
+			usecase.NewMoodUsecase,
 			telegram.NewHandler,
 			telegram.NewBot,
 			newLocation,
 			scheduler.New,
 		),
 		fx.Invoke(registerHooks),
-	fx.Invoke(func(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, activityRepo usecase.ActivityRepository, api *tgbotapi.BotAPI, log *zap.Logger) {
-		habitUC.SetGamificationNotifier(func(ctx context.Context, userID int64, _ int64, streak int) {
-			user, err := userUC.GetByID(ctx, userID)
-			if err != nil {
-				log.Warn("gamification GetByID", zap.Error(err))
-				return
-			}
-			gamification.Run(ctx, user, streak, activityRepo, api, log, userUC)
-		})
-	}),
+		fx.Invoke(func(habitUC *usecase.HabitUsecase, userUC *usecase.UserUsecase, activityRepo usecase.ActivityRepository, api *tgbotapi.BotAPI, log *zap.Logger) {
+			habitUC.SetGamificationNotifier(func(ctx context.Context, userID int64, _ int64, streak int) {
+				user, err := userUC.GetByID(ctx, userID)
+				if err != nil {
+					log.Warn("gamification GetByID", zap.Error(err))
+					return
+				}
+				gamification.Run(ctx, user, streak, activityRepo, api, log, userUC)
+			})
+		}),
 	)
 }
 

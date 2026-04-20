@@ -16,6 +16,7 @@ type Habit struct {
 	BestStreak      int
 	IsPaused        bool
 	GoalDays        int
+	Motivation      string
 	SnoozeUntil     *time.Time
 	CreatedAt       time.Time
 }

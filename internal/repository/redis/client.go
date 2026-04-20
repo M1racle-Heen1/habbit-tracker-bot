@@ -27,6 +27,10 @@ func (c *Cache) Set(ctx context.Context, key string, value string, ttl time.Dura
 	return c.client.Set(ctx, key, value, ttl).Err()
 }
 
+func (c *Cache) SetNX(ctx context.Context, key string, value string, ttl time.Duration) (bool, error) {
+	return c.client.SetNX(ctx, key, value, ttl).Result()
+}
+
 func (c *Cache) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }

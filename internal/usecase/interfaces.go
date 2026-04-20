@@ -26,11 +26,13 @@ type HabitRepository interface {
 	GetByID(ctx context.Context, id int64) (*domain.Habit, error)
 	Update(ctx context.Context, habit *domain.Habit) error
 	UpdateSettings(ctx context.Context, habit *domain.Habit) error
+	MarkDoneWithActivity(ctx context.Context, habit *domain.Habit, activity *domain.Activity) error
 	SetSnoozeUntil(ctx context.Context, habitID int64, t *time.Time) error
 	Delete(ctx context.Context, habitID, userID int64) error
 	SetLastNotifiedAt(ctx context.Context, habitID int64, t time.Time) error
 	ListAllWithTelegramID(ctx context.Context) ([]*domain.HabitWithTelegramID, error)
 	ResetStreaksForInactive(ctx context.Context) error
+	ResetHabitStreak(ctx context.Context, habitID int64) error
 	ListStreaksToBeReset(ctx context.Context) ([]*domain.HabitWithTelegramID, error)
 }
 
@@ -38,14 +40,23 @@ type ActivityRepository interface {
 	Save(ctx context.Context, activity *domain.Activity) error
 	ListByUserAndDate(ctx context.Context, userID int64, date time.Time) ([]*domain.Activity, error)
 	CountByHabitAndDateRange(ctx context.Context, habitID int64, from, to time.Time) (int, error)
+	CountsByHabitsAndDateRange(ctx context.Context, habitIDs []int64, from, to time.Time) (map[int64]int, error)
 	ListDatesByHabitAndDateRange(ctx context.Context, habitID int64, from, to time.Time) ([]time.Time, error)
 	CountAllByUser(ctx context.Context, userID int64) (int, error)
 	GetAverageCompletionHour(ctx context.Context, habitID int64) (hour int, hasData bool, err error)
 	DeleteTodayActivity(ctx context.Context, habitID int64, date time.Time) error
+	GetDayOfWeekCounts(ctx context.Context, userID int64, timezone string, from, to time.Time) (map[int]int, error)
+}
+
+type MoodRepository interface {
+	Save(ctx context.Context, userID int64, date time.Time, mood int) error
+	GetByUserAndDateRange(ctx context.Context, userID int64, from, to time.Time) ([]domain.MoodLog, error)
+	HasLoggedToday(ctx context.Context, userID int64, date time.Time) (bool, error)
 }
 
 type Cache interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key string, value string, ttl time.Duration) error
+	SetNX(ctx context.Context, key string, value string, ttl time.Duration) (bool, error)
 	Delete(ctx context.Context, key string) error
 }

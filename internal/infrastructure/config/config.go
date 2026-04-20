@@ -2,7 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -24,6 +26,9 @@ func New() (*Config, error) {
 	}
 	if cfg.DBDSN == "" {
 		return nil, errors.New("DB_DSN is required")
+	}
+	if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+		return nil, fmt.Errorf("invalid TIMEZONE %q: %w", cfg.Timezone, err)
 	}
 	return cfg, nil
 }
