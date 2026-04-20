@@ -220,6 +220,9 @@ func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convSta
 		m.ReplyMarkup = templateKeyboard(lang)
 		_, err := h.api.Send(m)
 		return err
+	case stepAwaitName, stepEditAwaitName:
+		_, err := h.api.Send(tgbotapi.NewMessage(chatID, i18n.T(lang, "habit.enter_name")))
+		return err
 	case stepAwaitInterval:
 		return h.sendIntervalKeyboard(chatID, lang)
 	case stepAwaitStartHour:
@@ -228,11 +231,13 @@ func (h *Handler) resendCurrentStep(chatID int64, lang i18n.Lang, state *convSta
 		return h.sendEndHourKeyboard(chatID, lang, state.StartHour+1)
 	case stepAwaitGoal:
 		return h.sendGoalKeyboard(chatID, lang)
-	case stepAwaitMotivation:
+	case stepAwaitMotivation, stepEditAwaitMotivation:
 		return h.sendMotivationPrompt(chatID, lang)
-	default:
+	case stepEditAwaitEndHour:
+		h.sendEditEndHourKeyboard(chatID, state.EditHabitID, state.StartHour+1, lang)
 		return nil
 	}
+	return nil
 }
 
 func (h *Handler) sendMotivationPrompt(chatID int64, lang i18n.Lang) error {

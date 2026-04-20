@@ -334,7 +334,7 @@ func (h *Handler) handleText(ctx context.Context, msg *tgbotapi.Message, user *d
 		}
 		h.clearState(msg.From.ID)
 
-	default:
+	case stepIdle, stepAwaitInterval, stepAwaitStartHour, stepAwaitEndHour, stepAwaitGoal, stepEditAwaitEndHour:
 		if err := h.resendCurrentStep(msg.Chat.ID, lang, state); err != nil {
 			h.clearState(msg.From.ID)
 			h.send(msg.Chat.ID, i18n.T(lang, "error.generic"))
