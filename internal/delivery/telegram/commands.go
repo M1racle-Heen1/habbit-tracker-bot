@@ -328,6 +328,15 @@ func (h *Handler) handleStats(ctx context.Context, msg *tgbotapi.Message, user *
 	sb.WriteString("\n\n")
 	sb.WriteString(i18n.T(lang, "stats.xp_level", user.Level, user.XP, user.StreakShields))
 
+	// 7-day mood summary
+	weekFrom := now.AddDate(0, 0, -6)
+	moods, err := h.moodUC.GetWeekMoods(ctx, user.ID, weekFrom, now.AddDate(0, 0, 1))
+	if err != nil {
+		h.logger.Warn("handleStats GetWeekMoods", zap.Error(err))
+	} else if len(moods) > 0 {
+		sb.WriteString(format.BuildMoodSummary(moods, lang))
+	}
+
 	// Per-habit buttons (tapping opens history)
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, s := range monthStats {
