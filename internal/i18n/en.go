@@ -1,6 +1,12 @@
 package i18n
 
 var enMessages = map[string]string{
+	"template.water":    "💧 Drink water",
+	"template.exercise": "🏃 Exercise",
+	"template.read":     "📚 Read",
+	"template.meditate": "🧘 Meditate",
+	"template.sleep":    "😴 Sleep routine",
+	"template.custom":   "✏️ Custom habit",
 	"error.generic":           "Something went wrong, please try again later.",
 	"error.update":            "Update failed.",
 	"action.cancelled":        "❌ Action cancelled.",
@@ -149,4 +155,35 @@ var enMessages = map[string]string{
 	"stats.month_line":         "This month: %d%% (%d/%d)",
 	"stats.habit_btn":          "%s  🔥%d  %d%%",
 	"stats.habit_btn_paused":   "%s  ⏸ paused",
+	// Today progress bar
+	"today.header_progress": "📋 Today [%d/%d] %s (%d%%)\n\n",
+	// Habit motivation wizard
+	"habit.enter_motivation":   "💬 Why do you want this habit? (or skip)",
+	"habit.motivation_skip":    "⏭ Skip",
+	"habit.motivation_saved":   "✅ Motivation updated.",
+	"edit.motivation_btn":      "💬 My Why",
+	"reminder.motivation":      "💬 %s",
+	"wizard.goal_set_confirm":  "🎯 Goal: %d days ✓",
+	"wizard.no_goal_confirm":   "✓ No goal set",
+	// Mood check-in
+	"mood.check_in":     "How was your day? 🌟",
+	"mood.great":        "😊 Great",
+	"mood.okay":         "😐 Okay",
+	"mood.tough":        "😞 Tough",
+	"mood.saved_great":  "😊 Noted! Keep it up!",
+	"mood.saved_okay":   "😐 Noted. Tomorrow will be better!",
+	"mood.saved_tough":  "😞 Noted. Take care of yourself 💙",
+	"mood.week_summary": "\nMood this week: %s",
+	"mood.burnout_alert": "💙 Three tough days this week — that's a lot.\n\nWould you like to pause a habit for a short break?",
+	"mood.already_logged": "You logged %s today — want to change it?",
+	// Day-of-week insights
+	"insights.not_enough_data": "Not enough data yet. Keep tracking!",
+	"insights.tip":             "\n💡 %s is your best day (%d%%). %s is toughest (%d%%) — try to prepare the night before!",
+	"weekday.0": "Sunday",
+	"weekday.1": "Monday",
+	"weekday.2": "Tuesday",
+	"weekday.3": "Wednesday",
+	"weekday.4": "Thursday",
+	"weekday.5": "Friday",
+	"weekday.6": "Saturday",
 }

@@ -1,6 +1,12 @@
 package i18n
 
 var ruMessages = map[string]string{
+	"template.water":    "💧 Пить воду",
+	"template.exercise": "🏃 Зарядка",
+	"template.read":     "📚 Читать",
+	"template.meditate": "🧘 Медитация",
+	"template.sleep":    "😴 Режим сна",
+	"template.custom":   "✏️ Своя привычка",
 	"error.generic":           "Произошла ошибка, попробуй позже.",
 	"error.update":            "Ошибка обновления.",
 	"action.cancelled":        "❌ Действие отменено.",
@@ -149,4 +155,35 @@ var ruMessages = map[string]string{
 	"stats.month_line":         "Этот месяц:  %d%% (%d/%d)",
 	"stats.habit_btn":          "%s  🔥%d  %d%%",
 	"stats.habit_btn_paused":   "%s  ⏸ пауза",
+	// Today progress bar
+	"today.header_progress": "📋 Сегодня [%d/%d] %s (%d%%)\n\n",
+	// Habit motivation wizard
+	"habit.enter_motivation":   "💬 Зачем тебе эта привычка? (или пропусти)",
+	"habit.motivation_skip":    "⏭ Пропустить",
+	"habit.motivation_saved":   "✅ Мотивация обновлена.",
+	"edit.motivation_btn":      "💬 Мой Зачем",
+	"reminder.motivation":      "💬 %s",
+	"wizard.goal_set_confirm":  "🎯 Цель: %d дней ✓",
+	"wizard.no_goal_confirm":   "✓ Без цели",
+	// Mood check-in
+	"mood.check_in":     "Как прошёл твой день? 🌟",
+	"mood.great":        "😊 Отлично",
+	"mood.okay":         "😐 Нормально",
+	"mood.tough":        "😞 Сложно",
+	"mood.saved_great":  "😊 Записал! Так держать!",
+	"mood.saved_okay":   "😐 Записал. Завтра будет лучше!",
+	"mood.saved_tough":  "😞 Записал. Береги себя 💙",
+	"mood.week_summary": "\nНастроение за неделю: %s",
+	"mood.burnout_alert": "💙 Три сложных дня за неделю — это много.\n\nМожет, поставить одну привычку на паузу?",
+	"mood.already_logged": "Ты уже отметил(а) %s сегодня — изменить?",
+	// Day-of-week insights
+	"insights.not_enough_data": "Пока недостаточно данных. Продолжай отслеживать!",
+	"insights.tip":             "\n💡 %s — твой лучший день (%d%%). %s сложнее (%d%%) — готовься накануне!",
+	"weekday.0": "Воскресенье",
+	"weekday.1": "Понедельник",
+	"weekday.2": "Вторник",
+	"weekday.3": "Среда",
+	"weekday.4": "Четверг",
+	"weekday.5": "Пятница",
+	"weekday.6": "Суббота",
 }

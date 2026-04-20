@@ -83,3 +83,12 @@ func TestStatsKeysExistAllLangs(t *testing.T) {
 		}
 	}
 }
+
+func TestMoodAlreadyLoggedKeyExistsAllLangs(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.RU, i18n.EN, i18n.KZ} {
+		got := i18n.T(lang, "mood.already_logged", "😊")
+		if got == "mood.already_logged" || got == "" {
+			t.Errorf("lang=%s: key mood.already_logged missing or empty (got %q)", lang, got)
+		}
+	}
+}

@@ -1,6 +1,12 @@
 package i18n
 
 var kzMessages = map[string]string{
+	"template.water":    "💧 Су ішу",
+	"template.exercise": "🏃 Жаттығу",
+	"template.read":     "📚 Оқу",
+	"template.meditate": "🧘 Медитация",
+	"template.sleep":    "😴 Ұйқы режимі",
+	"template.custom":   "✏️ Өз әдетім",
 	"error.generic":           "Қате орын алды, кейінірек көріңіз.",
 	"error.update":            "Жаңарту қатесі.",
 	"action.cancelled":        "❌ Әрекет болдырылмады.",
@@ -149,4 +155,35 @@ var kzMessages = map[string]string{
 	"stats.month_line":         "Осы ай:      %d%% (%d/%d)",
 	"stats.habit_btn":          "%s  🔥%d  %d%%",
 	"stats.habit_btn_paused":   "%s  ⏸ үзіліс",
+	// Today progress bar
+	"today.header_progress": "📋 Бүгін [%d/%d] %s (%d%%)\n\n",
+	// Habit motivation wizard
+	"habit.enter_motivation":   "💬 Бұл әдет неліктен керек? (немесе өткізіп жіберіңіз)",
+	"habit.motivation_skip":    "⏭ Өткізіп жіберу",
+	"habit.motivation_saved":   "✅ Мотивация жаңартылды.",
+	"edit.motivation_btn":      "💬 Менің себебім",
+	"reminder.motivation":      "💬 %s",
+	"wizard.goal_set_confirm":  "🎯 Мақсат: %d күн ✓",
+	"wizard.no_goal_confirm":   "✓ Мақсатсыз",
+	// Mood check-in
+	"mood.check_in":     "Күніңіз қалай өтті? 🌟",
+	"mood.great":        "😊 Тамаша",
+	"mood.okay":         "😐 Қалыпты",
+	"mood.tough":        "😞 Қиын",
+	"mood.saved_great":  "😊 Жазылды! Осылай жалғастырыңыз!",
+	"mood.saved_okay":   "😐 Жазылды. Ертең жақсырақ болады!",
+	"mood.saved_tough":  "😞 Жазылды. Өзіңізді күтіңіз 💙",
+	"mood.week_summary": "\nАптадағы көңіл-күй: %s",
+	"mood.burnout_alert": "💙 Аптада үш қиын күн — бұл өте көп.\n\nБір әдетті кідірткіңіз келе ме?",
+	"mood.already_logged": "Бүгін %s деп белгіледіңіз — өзгерту керек пе?",
+	// Day-of-week insights
+	"insights.not_enough_data": "Деректер әлі жеткіліксіз. Бақылауды жалғастырыңыз!",
+	"insights.tip":             "\n💡 %s — сіздің ең жақсы күніңіз (%d%%). %s қиынырақ (%d%%) — алдын ала дайындалыңыз!",
+	"weekday.0": "Жексенбі",
+	"weekday.1": "Дүйсенбі",
+	"weekday.2": "Сейсенбі",
+	"weekday.3": "Сәрсенбі",
+	"weekday.4": "Бейсенбі",
+	"weekday.5": "Жұма",
+	"weekday.6": "Сенбі",
 }
