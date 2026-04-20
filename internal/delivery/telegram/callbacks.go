@@ -79,7 +79,8 @@ func (h *Handler) cbTemplate(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		return
 	}
 	h.clearState(cq.From.ID)
-	habit, err := h.habitUC.CreateHabit(ctx, user.ID, tmpl.Name, tmpl.Interval, tmpl.Start, tmpl.End, 0)
+	habitName := i18n.T(lang, "template."+arg)
+	habit, err := h.habitUC.CreateHabit(ctx, user.ID, habitName, tmpl.Interval, tmpl.Start, tmpl.End, 0, "")
 	if err != nil {
 		h.logger.Error("CreateHabit template", zap.Error(err))
 		h.send(chatID, i18n.T(lang, "error.generic"))
@@ -177,14 +178,32 @@ func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		h.removeKeyboard(chatID, msgID)
 		return
 	}
-	endHour := state.EndHour
-	h.clearState(cq.From.ID)
-
-	user, lang, err := h.getUserFromCallback(ctx, cq)
+	_, lang, err := h.getUserFromCallback(ctx, cq)
 	if err != nil {
 		return
 	}
-	habit, err := h.habitUC.CreateHabit(ctx, user.ID, state.HabitName, state.IntervalMinutes, state.StartHour, endHour, goalDays)
+
+	// Save goal and move to motivation step instead of creating the habit immediately.
+	state.GoalDays = goalDays
+	state.Step = stepAwaitMotivation
+	h.setState(cq.From.ID, state)
+	var confirmMsg string
+	if goalDays > 0 {
+		confirmMsg = i18n.T(lang, "wizard.goal_set_confirm", goalDays)
+	} else {
+		confirmMsg = i18n.T(lang, "wizard.no_goal_confirm")
+	}
+	h.editMsg(chatID, msgID, confirmMsg)
+	if err := h.sendMotivationPrompt(chatID, lang); err != nil {
+		h.logger.Error("sendMotivationPrompt", zap.Error(err))
+	}
+}
+
+// finishHabitCreation is called once the motivation step is resolved (either
+// with a value or skipped). It creates the habit and sends the confirmation.
+func (h *Handler) finishHabitCreation(ctx context.Context, chatID, telegramID int64, state *convState, motivation string, lang i18n.Lang, user *domain.User) {
+	h.clearState(telegramID)
+	habit, err := h.habitUC.CreateHabit(ctx, user.ID, state.HabitName, state.IntervalMinutes, state.StartHour, state.EndHour, state.GoalDays, motivation)
 	if err != nil {
 		h.logger.Error("CreateHabit", zap.Error(err))
 		h.send(chatID, i18n.T(lang, "error.generic"))
@@ -192,10 +211,94 @@ func (h *Handler) cbAddGoal(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 	}
 	result := i18n.T(lang, "habit.created",
 		habit.Name, formatInterval(habit.IntervalMinutes, lang), habit.StartHour, habit.EndHour)
-	if goalDays > 0 {
-		result += "\n" + i18n.T(lang, "habit.goal_set", goalDays)
+	if state.GoalDays > 0 {
+		result += "\n" + i18n.T(lang, "habit.goal_set", state.GoalDays)
 	}
-	h.editMsgAndClearMarkup(chatID, msgID, result)
+	h.send(chatID, result)
+	h.sendMainNav(chatID, lang)
+}
+
+func (h *Handler) cbAddMotivation(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	if arg != "skip" {
+		return
+	}
+	user, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	state := h.getState(cq.From.ID)
+	if state == nil || state.Step != stepAwaitMotivation {
+		h.removeKeyboard(chatID, msgID)
+		return
+	}
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.motivation_skip"))
+	h.finishHabitCreation(ctx, chatID, cq.From.ID, state, "", lang, user)
+}
+
+func (h *Handler) cbMood(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	mood, err := strconv.Atoi(arg)
+	if err != nil || mood < 1 || mood > 3 {
+		return
+	}
+	user, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	if err := h.moodUC.LogMood(ctx, user.ID, time.Now(), mood); err != nil {
+		h.logger.Error("LogMood", zap.Error(err))
+		h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "error.generic"))
+		return
+	}
+	var key string
+	switch mood {
+	case 3:
+		key = "mood.saved_great"
+	case 2:
+		key = "mood.saved_okay"
+	default:
+		key = "mood.saved_tough"
+	}
+	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, key))
+}
+
+func (h *Handler) cbEditMotivation(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+	habitID, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return
+	}
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
+	}
+	h.clearState(cq.From.ID)
+	h.setState(cq.From.ID, &convState{Step: stepEditAwaitMotivation, EditHabitID: habitID, Lang: lang})
+	h.removeKeyboard(chatID, msgID)
+	h.send(chatID, i18n.T(lang, "habit.enter_motivation"))
+}
+
+// maybeSendMoodPrompt checks if all non-paused habits are done today and
+// the user hasn't logged their mood yet or been prompted today; if so, sends the mood prompt.
+func (h *Handler) maybeSendMoodPrompt(ctx context.Context, chatID int64, user *domain.User, lang i18n.Lang) {
+	habits, err := h.habitUC.ListHabits(ctx, user.ID)
+	if err != nil || len(habits) == 0 {
+		return
+	}
+	now := time.Now()
+	for _, hab := range habits {
+		if !hab.IsPaused && !usecase.IsDoneToday(hab, now) {
+			return
+		}
+	}
+	logged, err := h.moodUC.HasLoggedToday(ctx, user.ID)
+	if err != nil || logged {
+		return
+	}
+	moodKey := fmt.Sprintf("mood_prompt:%d:%s", chatID, now.Format("2006-01-02"))
+	if _, err := h.cache.Get(ctx, moodKey); err == nil {
+		return
+	}
+	h.sendMoodPrompt(chatID, lang)
+	_ = h.cache.Set(ctx, moodKey, "1", 25*time.Hour)
 }
 
 func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -247,6 +350,7 @@ func (h *Handler) cbDone(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID
 	if _, err := h.api.Send(edit); err != nil {
 		h.logger.Error("edit done msg", zap.Error(err))
 	}
+	go h.maybeSendMoodPrompt(context.Background(), chatID, user, lang)
 }
 
 func (h *Handler) cbUndo(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -305,6 +409,7 @@ func (h *Handler) cbDoneAll(ctx context.Context, cq *tgbotapi.CallbackQuery, cha
 		_ = h.habitUC.MarkDone(ctx, user.ID, habit.ID)
 	}
 	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "today.all_done"))
+	go h.maybeSendMoodPrompt(context.Background(), chatID, user, lang)
 }
 
 func (h *Handler) cbTimerStart(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
@@ -459,24 +564,26 @@ func (h *Handler) cbEditMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "edit.hours_btn"), fmt.Sprintf("edit_start:%d:menu", habitID)),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "edit.goal_btn"), fmt.Sprintf("goal_menu:%d", habitID)),
 		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "edit.motivation_btn"), fmt.Sprintf("edit_motivation:%d", habitID)),
+		),
 	)
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send edit menu", zap.Error(err))
 	}
 }
 
-func (h *Handler) cbEditName(cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+func (h *Handler) cbEditName(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
 	habitID, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
 		return
 	}
-	// Determine lang without creating user (best-effort)
-	lang := i18n.RU
-	if user, err := h.userUC.GetOrCreateUser(context.Background(), cq.From.ID, cq.From.UserName, cq.From.FirstName); err == nil {
-		lang = h.lang(user)
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
 	}
 	h.clearState(cq.From.ID)
-	h.setState(cq.From.ID, &convState{Step: stepEditAwaitName, EditHabitID: habitID})
+	h.setState(cq.From.ID, &convState{Step: stepEditAwaitName, EditHabitID: habitID, Lang: lang})
 	h.removeKeyboard(chatID, msgID)
 	h.send(chatID, i18n.T(lang, "habit.edit_enter_name"))
 }
@@ -512,16 +619,15 @@ func (h *Handler) cbEditInterval(ctx context.Context, cq *tgbotapi.CallbackQuery
 	h.editMsgAndClearMarkup(chatID, msgID, i18n.T(lang, "habit.interval_updated", formatInterval(minutes, lang)))
 }
 
-func (h *Handler) cbEditStart(cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
+func (h *Handler) cbEditStart(ctx context.Context, cq *tgbotapi.CallbackQuery, chatID int64, msgID int, arg string) {
 	subparts := strings.SplitN(arg, ":", 2)
 	habitID, err := strconv.ParseInt(subparts[0], 10, 64)
 	if err != nil {
 		return
 	}
-	lang := i18n.RU
-	user, err := h.userUC.GetOrCreateUser(context.Background(), cq.From.ID, cq.From.UserName, cq.From.FirstName)
-	if err == nil {
-		lang = h.lang(user)
+	_, lang, err := h.getUserFromCallback(ctx, cq)
+	if err != nil {
+		return
 	}
 	if len(subparts) == 1 || subparts[1] == "menu" {
 		h.sendEditStartHourKeyboard(chatID, habitID, lang)
@@ -536,6 +642,7 @@ func (h *Handler) cbEditStart(cq *tgbotapi.CallbackQuery, chatID int64, msgID in
 		Step:        stepEditAwaitEndHour,
 		EditHabitID: habitID,
 		StartHour:   startHour,
+		Lang:        lang,
 	})
 	h.editMsg(chatID, msgID, fmt.Sprintf("🕐 %d:00 ✓", startHour))
 	h.sendEditEndHourKeyboard(chatID, habitID, startHour+1, lang)
@@ -676,17 +783,10 @@ func (h *Handler) cbGoalMenu(ctx context.Context, cq *tgbotapi.CallbackQuery, ch
 		return
 	}
 	m := tgbotapi.NewMessage(chatID, i18n.T(lang, "goal.choose"))
-	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 21), fmt.Sprintf("set_goal:%d:21", habitID)),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 30), fmt.Sprintf("set_goal:%d:30", habitID)),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 66), fmt.Sprintf("set_goal:%d:66", habitID)),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.days_btn", 100), fmt.Sprintf("set_goal:%d:100", habitID)),
-			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "goal.no_goal"), fmt.Sprintf("set_goal:%d:0", habitID)),
-		),
-	)
+	rows := goalKeyboardRows(lang, func(days int) string {
+		return fmt.Sprintf("set_goal:%d:%d", habitID, days)
+	})
+	m.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := h.api.Send(m); err != nil {
 		h.logger.Error("send goal menu", zap.Error(err))
 	}
