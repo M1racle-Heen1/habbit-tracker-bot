@@ -29,7 +29,7 @@ The `/mood` command needs today's logged mood. Rather than adding `GetByDate`, c
 New handler `handleMood(ctx, msg, user)`:
 
 1. Call `moodUC.GetWeekMoods(ctx, user.ID, today, tomorrow)` to check today's entry.
-2. **If logged:** send `i18n.T(lang, "mood.already_logged", moodEmoji)` then immediately call `h.sendMoodPrompt(chatID, lang)`. The existing `cbMood` handler already does an upsert (`ON CONFLICT DO UPDATE`), so re-tapping a mood option overwrites silently.
+2. **If logged:** send a single message with text `i18n.T(lang, "mood.already_logged", moodEmoji)` and the mood inline keyboard as `ReplyMarkup` (same buttons as `sendMoodPrompt`). `moodEmoji` is resolved via a local `map[int]string{1:"😞", 2:"😐", 3:"😊"}` on `moods[0].Mood`. The existing `cbMood` handler does upsert, so re-tapping overwrites silently.
 3. **If not logged:** call `h.sendMoodPrompt(chatID, lang)` directly.
 
 **New i18n key** (all 3 language files):
