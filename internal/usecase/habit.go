@@ -30,7 +30,7 @@ type HabitStats struct {
 	CompletionPct int
 }
 
-func (u *HabitUsecase) CreateHabit(ctx context.Context, userID int64, name string, intervalMinutes, startHour, endHour, goalDays int) (*domain.Habit, error) {
+func (u *HabitUsecase) CreateHabit(ctx context.Context, userID int64, name string, intervalMinutes, startHour, endHour, goalDays int, motivation string) (*domain.Habit, error) {
 	habit := &domain.Habit{
 		UserID:          userID,
 		Name:            name,
@@ -38,6 +38,7 @@ func (u *HabitUsecase) CreateHabit(ctx context.Context, userID int64, name strin
 		StartHour:       startHour,
 		EndHour:         endHour,
 		GoalDays:        goalDays,
+		Motivation:      motivation,
 	}
 	if err := u.habitRepo.Create(ctx, habit); err != nil {
 		return nil, err
@@ -74,17 +75,13 @@ func (u *HabitUsecase) MarkDone(ctx context.Context, userID, habitID int64) erro
 	}
 	habit.LastDoneAt = &now
 
-	if err := u.habitRepo.Update(ctx, habit); err != nil {
-		return err
-	}
-	// Clear snooze after marking done
-	_ = u.habitRepo.SetSnoozeUntil(ctx, habitID, nil)
-
-	if err := u.activityRepo.Save(ctx, &domain.Activity{
+	activity := &domain.Activity{
 		UserID:  userID,
 		HabitID: habitID,
 		Date:    now,
-	}); err != nil {
+	}
+	// Atomically update habit + insert activity + clear snooze in one transaction.
+	if err := u.habitRepo.MarkDoneWithActivity(ctx, habit, activity); err != nil {
 		return err
 	}
 
@@ -111,10 +108,29 @@ func (u *HabitUsecase) EditHabit(ctx context.Context, userID, habitID int64, nam
 	habit.IntervalMinutes = intervalMinutes
 	habit.StartHour = startHour
 	habit.EndHour = endHour
+	// Motivation is preserved from the fetched habit (not overwritten).
 	if err := u.habitRepo.UpdateSettings(ctx, habit); err != nil {
 		return nil, err
 	}
 	return habit, nil
+}
+
+func (u *HabitUsecase) SetMotivation(ctx context.Context, userID, habitID int64, motivation string) error {
+	habit, err := u.habitRepo.GetByID(ctx, habitID)
+	if err != nil {
+		return err
+	}
+	if habit.UserID != userID {
+		return domain.ErrForbidden
+	}
+	habit.Motivation = motivation
+	return u.habitRepo.UpdateSettings(ctx, habit)
+}
+
+func (u *HabitUsecase) GetDayOfWeekStats(ctx context.Context, userID int64, timezone string) (map[int]int, error) {
+	now := time.Now()
+	from := now.AddDate(0, -3, 0)
+	return u.activityRepo.GetDayOfWeekCounts(ctx, userID, timezone, from, now.AddDate(0, 0, 1))
 }
 
 func (u *HabitUsecase) PauseHabit(ctx context.Context, userID, habitID int64) error {
@@ -163,15 +179,27 @@ func (u *HabitUsecase) GetStats(ctx context.Context, userID int64, days int) ([]
 	if err != nil {
 		return nil, err
 	}
+	if len(habits) == 0 {
+		return nil, nil
+	}
+
 	now := time.Now()
 	from := now.AddDate(0, 0, -days)
+	to := now.AddDate(0, 0, 1)
 
-	var stats []*HabitStats
+	habitIDs := make([]int64, len(habits))
+	for i, h := range habits {
+		habitIDs[i] = h.ID
+	}
+
+	counts, err := u.activityRepo.CountsByHabitsAndDateRange(ctx, habitIDs, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := make([]*HabitStats, 0, len(habits))
 	for _, h := range habits {
-		count, err := u.activityRepo.CountByHabitAndDateRange(ctx, h.ID, from, now.AddDate(0, 0, 1))
-		if err != nil {
-			return nil, err
-		}
+		count := counts[h.ID]
 		daysActive := int(now.Sub(h.CreatedAt).Hours()/24) + 1
 		if daysActive > days {
 			daysActive = days
@@ -211,6 +239,10 @@ func (u *HabitUsecase) ListAllForScheduler(ctx context.Context) ([]*domain.Habit
 
 func (u *HabitUsecase) ResetStreaks(ctx context.Context) error {
 	return u.habitRepo.ResetStreaksForInactive(ctx)
+}
+
+func (u *HabitUsecase) ResetHabitStreak(ctx context.Context, habitID int64) error {
+	return u.habitRepo.ResetHabitStreak(ctx, habitID)
 }
 
 func (u *HabitUsecase) ListStreaksToBeReset(ctx context.Context) ([]*domain.HabitWithTelegramID, error) {
@@ -253,6 +285,7 @@ func IsFinalReminder(h *domain.Habit, now time.Time) bool {
 }
 
 func sameDay(a, b time.Time) bool {
+	a = a.In(b.Location())
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
@@ -261,11 +294,6 @@ func sameDay(a, b time.Time) bool {
 // GetActivityAverageHour returns the average completion hour for a habit over the last 30 days.
 func (u *HabitUsecase) GetActivityAverageHour(ctx context.Context, habitID int64) (int, bool, error) {
 	return u.activityRepo.GetAverageCompletionHour(ctx, habitID)
-}
-
-// TrackHabit is kept for backward compatibility.
-func (u *HabitUsecase) TrackHabit(ctx context.Context, userID, habitID int64) error {
-	return u.MarkDone(ctx, userID, habitID)
 }
 
 // UndoMarkDone reverts a MarkDone by deleting today's activity and restoring

@@ -128,22 +128,22 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 		}
 
 		// Morning digest at 8:00
-		if userNow.Hour() == 8 && userNow.Minute() == 0 {
+		if userNow.Hour() == 8 && userNow.Minute() < 5 {
 			s.maybeSendMorningDigest(ctx, g.telegramID, g.firstName, g.habits, userNow, lang)
 		}
 
 		// Weekly digest on Sundays at 20:00
-		if userNow.Weekday() == time.Sunday && userNow.Hour() == 20 && userNow.Minute() == 0 {
+		if userNow.Weekday() == time.Sunday && userNow.Hour() == 20 && userNow.Minute() < 5 {
 			s.maybeSendWeeklyDigest(ctx, g.telegramID, g.userID, g.habits, userNow, lang)
 		}
 
 		// Streak-at-risk alert at 20:00
-		if userNow.Hour() == 20 && userNow.Minute() == 0 {
+		if userNow.Hour() == 20 && userNow.Minute() < 5 {
 			s.maybeSendStreakRisk(ctx, g.telegramID, lang, g.habits, userNow)
 		}
 
 		// Evening recap at user-configured hour
-		if g.eveningRecapHour > 0 && userNow.Hour() == g.eveningRecapHour && userNow.Minute() == 0 {
+		if g.eveningRecapHour > 0 && userNow.Hour() == g.eveningRecapHour && userNow.Minute() < 5 {
 			s.maybeSendEveningRecap(ctx, g.telegramID, g.userID, lang, g.habits, userNow)
 		}
 
@@ -234,9 +234,6 @@ func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64
 	if _, err := s.cache.Get(ctx, key); err == nil {
 		return // already sent today
 	}
-	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
-		s.logger.Warn("morning digest cache set", zap.Error(err))
-	}
 
 	var sb strings.Builder
 	sb.WriteString(i18n.T(lang, "morning.header", firstName))
@@ -266,6 +263,10 @@ func (s *Scheduler) maybeSendMorningDigest(ctx context.Context, telegramID int64
 	}
 	if _, err := s.api.Send(msg); err != nil {
 		s.logger.Error("send morning digest", zap.Int64("telegram_id", telegramID), zap.Error(err))
+		return
+	}
+	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
+		s.logger.Warn("morning digest cache set", zap.Error(err))
 	}
 }
 
@@ -274,9 +275,6 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 	key := fmt.Sprintf("weekly:%d:%d:%d", telegramID, year, week)
 	if _, err := s.cache.Get(ctx, key); err == nil {
 		return // already sent this week
-	}
-	if err := s.cache.Set(ctx, key, "1", 8*24*time.Hour); err != nil {
-		s.logger.Warn("weekly digest cache set", zap.Error(err))
 	}
 
 	stats, err := s.habitUC.GetStats(ctx, userID, 7)
@@ -341,6 +339,10 @@ func (s *Scheduler) maybeSendWeeklyDigest(ctx context.Context, telegramID int64,
 
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send weekly digest", zap.Int64("telegram_id", telegramID), zap.Error(err))
+		return
+	}
+	if err := s.cache.Set(ctx, key, "1", 8*24*time.Hour); err != nil {
+		s.logger.Warn("weekly digest cache set", zap.Error(err))
 	}
 }
 
@@ -366,9 +368,6 @@ func (s *Scheduler) maybeSendEveningRecap(ctx context.Context, telegramID int64,
 	key := fmt.Sprintf("evening:%d:%s", telegramID, now.Format("2006-01-02"))
 	if _, err := s.cache.Get(ctx, key); err == nil {
 		return
-	}
-	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
-		s.logger.Warn("evening recap cache set", zap.Error(err))
 	}
 
 	if lang == "" {
@@ -416,6 +415,9 @@ func (s *Scheduler) maybeSendEveningRecap(ctx context.Context, telegramID int64,
 		s.logger.Error("send evening recap", zap.Int64("telegram_id", telegramID), zap.Error(err))
 		return
 	}
+	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
+		s.logger.Warn("evening recap cache set", zap.Error(err))
+	}
 
 	moodKey := fmt.Sprintf("mood_prompt:%d:%s", telegramID, now.Format("2006-01-02"))
 	if _, err := s.cache.Get(ctx, moodKey); err != nil {
@@ -461,10 +463,6 @@ func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, l
 		return
 	}
 
-	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
-		s.logger.Warn("streak risk cache set", zap.Error(err))
-	}
-
 	if lang == "" {
 		lang = i18n.RU
 	}
@@ -477,6 +475,10 @@ func (s *Scheduler) maybeSendStreakRisk(ctx context.Context, telegramID int64, l
 
 	if _, err := s.api.Send(tgbotapi.NewMessage(telegramID, sb.String())); err != nil {
 		s.logger.Error("send streak risk", zap.Int64("telegram_id", telegramID), zap.Error(err))
+		return
+	}
+	if err := s.cache.Set(ctx, key, "1", 25*time.Hour); err != nil {
+		s.logger.Warn("streak risk cache set", zap.Error(err))
 	}
 }
 
